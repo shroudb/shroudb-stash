@@ -1,0 +1,25 @@
+[package]
+name = "shroudb-stash-protocol"
+description = "RESP3 wire protocol for the Stash encrypted blob storage engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+shroudb-stash-core.workspace = true
+shroudb-stash-engine.workspace = true
+shroudb-acl.workspace = true
+shroudb-store.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+shroudb-storage = { workspace = true, features = ["testing"] }
+shroudb-crypto.workspace = true
+ring.workspace = true

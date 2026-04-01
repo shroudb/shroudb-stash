@@ -1,0 +1,49 @@
+[workspace]
+resolver = "3"
+default-members = ["shroudb-stash-protocol"]
+members = [
+    "shroudb-stash-core",
+    "shroudb-stash-engine",
+    "shroudb-stash-protocol",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+publish = ["shroudb"]
+
+[workspace.dependencies]
+# Internal crates
+shroudb-stash-core = { path = "shroudb-stash-core" }
+shroudb-stash-engine = { path = "shroudb-stash-engine" }
+
+# Commons
+shroudb-acl = { version = "0.1.4", registry = "shroudb" }
+shroudb-chronicle-core = { version = "1.2.6", registry = "shroudb" }
+shroudb-crypto = { version = "0.1.2", registry = "shroudb" }
+shroudb-storage = { version = "0.2.13", registry = "shroudb" }
+shroudb-store = { version = "0.1.2", registry = "shroudb" }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Crypto
+ring = "0.17"
+zeroize = { version = "1", features = ["derive"] }
+
+# S3
+aws-config = "1"
+aws-sdk-s3 = "1"
+aws-smithy-types = "1"
+
+# Utilities
+thiserror = "2"
+base64 = "0.22"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
