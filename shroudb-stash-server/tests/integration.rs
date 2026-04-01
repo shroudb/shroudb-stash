@@ -54,11 +54,18 @@ async fn test_store_and_retrieve() {
 
 #[tokio::test]
 async fn test_store_and_retrieve_minio() {
-    let server = TestServer::start_with_config(TestServerConfig {
+    let server = match TestServer::start_with_config(TestServerConfig {
         use_minio: true,
         ..Default::default()
     })
-    .await;
+    .await
+    {
+        Some(s) => s,
+        None => {
+            eprintln!("skipping: Docker unavailable");
+            return;
+        }
+    };
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -98,11 +105,18 @@ async fn test_store_and_retrieve_minio() {
 
 #[tokio::test]
 async fn test_hard_revoke_deletes_s3_object_minio() {
-    let server = TestServer::start_with_config(TestServerConfig {
+    let server = match TestServer::start_with_config(TestServerConfig {
         use_minio: true,
         ..Default::default()
     })
-    .await;
+    .await
+    {
+        Some(s) => s,
+        None => {
+            eprintln!("skipping: Docker unavailable");
+            return;
+        }
+    };
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -147,11 +161,18 @@ async fn test_hard_revoke_deletes_s3_object_minio() {
 
 #[tokio::test]
 async fn test_large_blob_minio() {
-    let server = TestServer::start_with_config(TestServerConfig {
+    let server = match TestServer::start_with_config(TestServerConfig {
         use_minio: true,
         ..Default::default()
     })
-    .await;
+    .await
+    {
+        Some(s) => s,
+        None => {
+            eprintln!("skipping: Docker unavailable");
+            return;
+        }
+    };
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -552,7 +573,9 @@ fn auth_server_config() -> TestServerConfig {
 
 #[tokio::test]
 async fn test_acl_unauthenticated_rejected() {
-    let server = TestServer::start_with_config(auth_server_config()).await;
+    let server = TestServer::start_with_config(auth_server_config())
+        .await
+        .expect("test server failed to start");
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -574,7 +597,9 @@ async fn test_acl_unauthenticated_rejected() {
 
 #[tokio::test]
 async fn test_acl_admin_full_access() {
-    let server = TestServer::start_with_config(auth_server_config()).await;
+    let server = TestServer::start_with_config(auth_server_config())
+        .await
+        .expect("test server failed to start");
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -606,7 +631,9 @@ async fn test_acl_admin_full_access() {
 
 #[tokio::test]
 async fn test_acl_app_token_read_write() {
-    let server = TestServer::start_with_config(auth_server_config()).await;
+    let server = TestServer::start_with_config(auth_server_config())
+        .await
+        .expect("test server failed to start");
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -638,7 +665,9 @@ async fn test_acl_app_token_read_write() {
 
 #[tokio::test]
 async fn test_acl_readonly_token_cannot_write() {
-    let server = TestServer::start_with_config(auth_server_config()).await;
+    let server = TestServer::start_with_config(auth_server_config())
+        .await
+        .expect("test server failed to start");
 
     // First, store a blob with admin so readonly has something to read.
     let mut admin = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
@@ -681,11 +710,137 @@ async fn test_acl_readonly_token_cannot_write() {
 
 #[tokio::test]
 async fn test_acl_wrong_token_rejected() {
-    let server = TestServer::start_with_config(auth_server_config()).await;
+    let server = TestServer::start_with_config(auth_server_config())
+        .await
+        .expect("test server failed to start");
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
 
     let err = client.auth("totally-wrong-token").await;
     assert!(err.is_err(), "wrong token should be rejected");
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Cipher-less mode: raw passthrough to S3
+// ═══════════════════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn test_no_cipher_raw_store_retrieve() {
+    let server = TestServer::start_with_config(TestServerConfig {
+        no_cipher: true,
+        ..Default::default()
+    })
+    .await
+    .expect("test server failed to start");
+    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    let plaintext = b"stored without encryption";
+
+    let store_result = client
+        .store("raw-1", plaintext, None, Some("text/plain"))
+        .await
+        .expect("store should succeed without Cipher");
+
+    assert_eq!(store_result.id, "raw-1");
+    // Raw mode: plaintext_size == encrypted_size (no crypto overhead).
+    assert_eq!(store_result.plaintext_size, store_result.encrypted_size);
+
+    // Retrieve should return raw bytes.
+    let result = client.retrieve("raw-1").await.expect("retrieve failed");
+    assert_eq!(result.data, plaintext);
+}
+
+#[tokio::test]
+async fn test_no_cipher_inspect_and_revoke() {
+    let server = TestServer::start_with_config(TestServerConfig {
+        no_cipher: true,
+        ..Default::default()
+    })
+    .await
+    .expect("test server failed to start");
+    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    client
+        .store("raw-rev", b"revoke me raw", None, None)
+        .await
+        .expect("store failed");
+
+    // Inspect works.
+    let info = client.inspect("raw-rev").await.expect("inspect failed");
+    assert_eq!(info.blob_status, "active");
+    assert_eq!(info.plaintext_size, info.encrypted_size);
+
+    // Hard revoke works.
+    let revoke_result = client
+        .revoke("raw-rev", false)
+        .await
+        .expect("revoke failed");
+    assert_eq!(revoke_result.revoke_mode, "hard");
+
+    // Retrieve fails after revoke.
+    let err = client.retrieve("raw-rev").await;
+    assert!(err.is_err());
+
+    // Inspect shows shredded.
+    let info = client.inspect("raw-rev").await.expect("inspect failed");
+    assert_eq!(info.blob_status, "shredded");
+}
+
+#[tokio::test]
+async fn test_no_cipher_with_minio() {
+    let server = match TestServer::start_with_config(TestServerConfig {
+        no_cipher: true,
+        use_minio: true,
+        ..Default::default()
+    })
+    .await
+    {
+        Some(s) => s,
+        None => {
+            eprintln!("skipping: Docker unavailable");
+            return;
+        }
+    };
+    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    let data = b"raw MinIO blob";
+
+    client
+        .store("raw-minio-1", data, None, Some("text/plain"))
+        .await
+        .expect("raw store to MinIO failed");
+
+    // Verify S3 object contains the raw (unencrypted) data directly.
+    let s3 = server.s3_client().await.expect("s3 client");
+    let bucket = server.s3_bucket.as_ref().unwrap();
+    let obj = s3
+        .get_object()
+        .bucket(bucket)
+        .key("raw-minio-1")
+        .send()
+        .await
+        .expect("S3 GET should find the raw object");
+    let s3_bytes = obj
+        .body
+        .collect()
+        .await
+        .expect("read body")
+        .into_bytes()
+        .to_vec();
+    // In raw mode, S3 contains the plaintext directly.
+    assert_eq!(s3_bytes, data);
+
+    // Retrieve via Stash roundtrips.
+    let result = client
+        .retrieve("raw-minio-1")
+        .await
+        .expect("retrieve failed");
+    assert_eq!(result.data, data);
 }

@@ -47,6 +47,8 @@ pub struct TestServerConfig {
     pub tokens: Vec<TestToken>,
     /// Use MinIO S3 backend instead of InMemoryObjectStore.
     pub use_minio: bool,
+    /// Disable Cipher capability (raw/unencrypted passthrough mode).
+    pub no_cipher: bool,
 }
 
 pub struct TestToken {
@@ -86,11 +88,14 @@ pub struct TestServer {
 impl TestServer {
     /// Start a test server with default config (no auth, in-memory store).
     pub async fn start() -> Self {
-        Self::start_with_config(TestServerConfig::default()).await
+        Self::start_with_config(TestServerConfig::default())
+            .await
+            .expect("test server failed to start")
     }
 
     /// Start a test server with custom config.
-    pub async fn start_with_config(config: TestServerConfig) -> Self {
+    /// Returns None if MinIO is requested but Docker is not available.
+    pub async fn start_with_config(config: TestServerConfig) -> Option<Self> {
         // Build object store (InMemory or MinIO-backed S3).
         let (object_store, minio_container, s3_endpoint, s3_bucket): (
             Arc<dyn ObjectStore>,
@@ -98,7 +103,7 @@ impl TestServer {
             Option<String>,
             Option<String>,
         ) = if config.use_minio {
-            let (store, container_id, endpoint, bucket) = start_minio().await;
+            let (store, container_id, endpoint, bucket) = start_minio().await?;
             (
                 Arc::new(store),
                 Some(container_id),
@@ -118,7 +123,11 @@ impl TestServer {
         // Build the in-process engine.
         let store = shroudb_storage::test_util::create_test_store("stash-integ").await;
         let caps = Capabilities {
-            cipher: Some(Box::new(MockCipherOps::new())),
+            cipher: if config.no_cipher {
+                None
+            } else {
+                Some(Box::new(MockCipherOps::new()))
+            },
             sentry: None,
             chronicle: None,
         };
@@ -152,14 +161,14 @@ impl TestServer {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        Self {
+        Some(Self {
             tcp_addr,
             shutdown_tx,
             _tcp_handle: tcp_handle,
             minio_container,
             s3_endpoint,
             s3_bucket,
-        }
+        })
     }
 
     /// Get a raw S3 client for direct verification (only available for MinIO tests).
@@ -192,13 +201,14 @@ impl Drop for TestServer {
 }
 
 /// Start a MinIO container and return an S3ObjectStore connected to it.
-async fn start_minio() -> (S3ObjectStore, String, String, String) {
+/// Returns None if Docker is not available.
+async fn start_minio() -> Option<(S3ObjectStore, String, String, String)> {
     let port = free_port();
     let endpoint = format!("http://127.0.0.1:{port}");
     let bucket = "stash-test";
 
     // Start MinIO container.
-    let output = Command::new("docker")
+    let output = match Command::new("docker")
         .args([
             "run",
             "-d",
@@ -214,13 +224,21 @@ async fn start_minio() -> (S3ObjectStore, String, String, String) {
             "/data",
         ])
         .output()
-        .expect("failed to start MinIO container — is Docker running?");
+    {
+        Ok(o) => o,
+        Err(_) => {
+            eprintln!("skipping MinIO test: docker not available");
+            return None;
+        }
+    };
 
-    assert!(
-        output.status.success(),
-        "MinIO container failed to start: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    if !output.status.success() {
+        eprintln!(
+            "skipping MinIO test: docker run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return None;
+    }
 
     let container_id = String::from_utf8(output.stdout)
         .expect("container id")
@@ -281,7 +299,7 @@ async fn start_minio() -> (S3ObjectStore, String, String, String) {
     let client = aws_sdk_s3::Client::from_conf(s3_config2);
 
     let store = S3ObjectStore::with_client(client, bucket.to_string());
-    (store, container_id, endpoint, bucket.to_string())
+    Some((store, container_id, endpoint, bucket.to_string()))
 }
 
 /// Simple TCP health check for MinIO readiness.
