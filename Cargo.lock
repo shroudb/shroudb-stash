@@ -2424,9 +2424,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shroudb-acl"
-version = "0.1.4"
+version = "0.1.5"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "b13f961886f2eba64b806bb51a4eb55d16a5d3613f6913b68844b534ba50e9b0"
+checksum = "790d153413e9fc8a96baad182fbf6a060fa60bd9acf27413d0069f73dfef2a3c"
 dependencies = [
  "serde",
  "shroudb-crypto",
@@ -2435,9 +2435,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.2.12"
+version = "1.2.16"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "98ebf5ccf86736aeb7f175fcb111690ae021e10b81abec8616b5aa8519b49461"
+checksum = "276bd411b458db6a28266b53a92f4d69450f092ba8f481cad2f9b43f2bbf59dd"
 dependencies = [
  "serde",
  "serde_json",
@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64",
  "serde",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2564,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64",
  "ring",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2611,9 +2611,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-storage"
-version = "0.2.14"
+version = "0.2.15"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "c77c1552528c8370bfcef78130bbdd3fbd29d94fb329daff4948c0043e46c16c"
+checksum = "c9b08b0124790519fa8679e6e56feaa5d6d791d4373f2045fa07e78ae94dc671"
 dependencies = [
  "crc32fast",
  "dashmap",
