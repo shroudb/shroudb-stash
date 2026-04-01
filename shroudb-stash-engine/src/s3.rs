@@ -35,9 +35,7 @@ impl S3ObjectStore {
             aws_config = aws_config.endpoint_url(endpoint);
         }
 
-        let sdk_config = aws_config
-            .load()
-            .await;
+        let sdk_config = aws_config.load().await;
 
         let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
             .force_path_style(config.endpoint.is_some());
@@ -90,9 +88,9 @@ impl ObjectStore for S3ObjectStore {
                 req = req.content_type(ct);
             }
 
-            req.send().await.map_err(|e| ObjectStoreError::Internal(
-                format!("S3 PUT {key}: {e}"),
-            ))?;
+            req.send()
+                .await
+                .map_err(|e| ObjectStoreError::Internal(format!("S3 PUT {key}: {e}")))?;
             Ok(())
         })
     }

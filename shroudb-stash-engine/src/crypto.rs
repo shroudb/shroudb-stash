@@ -1,4 +1,4 @@
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use shroudb_stash_core::error::StashError;
 
@@ -112,10 +112,7 @@ mod tests {
 
         let ciphertext = encrypt_blob(&key, plaintext).unwrap();
         assert_ne!(ciphertext, plaintext);
-        assert_eq!(
-            ciphertext.len(),
-            NONCE_LEN + plaintext.len() + TAG_LEN
-        );
+        assert_eq!(ciphertext.len(), NONCE_LEN + plaintext.len() + TAG_LEN);
 
         let decrypted = decrypt_blob(&key, &ciphertext).unwrap();
         assert_eq!(decrypted, plaintext);

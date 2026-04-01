@@ -4,7 +4,9 @@ use shroudb_acl::{AclRequirement, Scope};
 #[derive(Debug)]
 pub enum StashCommand {
     /// Authenticate this connection with a token.
-    Auth { token: String },
+    Auth {
+        token: String,
+    },
 
     /// Store an encrypted blob.
     Store {
@@ -17,13 +19,20 @@ pub enum StashCommand {
     },
 
     /// Retrieve and decrypt a blob.
-    Retrieve { id: String },
+    Retrieve {
+        id: String,
+    },
 
     /// Inspect blob metadata without decrypting.
-    Inspect { id: String },
+    Inspect {
+        id: String,
+    },
 
     /// Revoke a blob (hard crypto-shred by default, --soft for soft revoke).
-    Revoke { id: String, soft: bool },
+    Revoke {
+        id: String,
+        soft: bool,
+    },
 
     // Operational
     Health,
@@ -334,13 +343,19 @@ mod tests {
         };
         assert!(matches!(
             cmd.acl_requirement(),
-            AclRequirement::Namespace { scope: Scope::Write, .. }
+            AclRequirement::Namespace {
+                scope: Scope::Write,
+                ..
+            }
         ));
 
         let cmd = StashCommand::Retrieve { id: "test".into() };
         assert!(matches!(
             cmd.acl_requirement(),
-            AclRequirement::Namespace { scope: Scope::Read, .. }
+            AclRequirement::Namespace {
+                scope: Scope::Read,
+                ..
+            }
         ));
 
         let cmd = StashCommand::Revoke {
@@ -349,7 +364,10 @@ mod tests {
         };
         assert!(matches!(
             cmd.acl_requirement(),
-            AclRequirement::Namespace { scope: Scope::Write, .. }
+            AclRequirement::Namespace {
+                scope: Scope::Write,
+                ..
+            }
         ));
     }
 

@@ -8,8 +8,7 @@ use shroudb_crypto::SensitiveBytes;
 use shroudb_stash_core::error::StashError;
 
 /// Shorthand for a pinned boxed future used in capability traits.
-pub type BoxFut<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, StashError>> + Send + 'a>>;
+pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = Result<T, StashError>> + Send + 'a>>;
 
 /// Result of a data key generation operation.
 pub struct DataKeyPair {

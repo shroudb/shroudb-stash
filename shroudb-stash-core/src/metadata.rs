@@ -127,7 +127,11 @@ mod tests {
 
     #[test]
     fn blob_status_serde_roundtrip() {
-        for status in [BlobStatus::Active, BlobStatus::Revoked, BlobStatus::Shredded] {
+        for status in [
+            BlobStatus::Active,
+            BlobStatus::Revoked,
+            BlobStatus::Shredded,
+        ] {
             let json = serde_json::to_string(&status).unwrap();
             let parsed: BlobStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, status);

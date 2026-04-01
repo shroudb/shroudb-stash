@@ -26,8 +26,7 @@ pub enum ObjectStoreError {
 }
 
 /// Boxed future type for ObjectStore trait methods.
-pub type BoxFut<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, ObjectStoreError>> + Send + 'a>>;
+pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = Result<T, ObjectStoreError>> + Send + 'a>>;
 
 /// Abstraction over an S3-compatible object store.
 ///
@@ -94,13 +93,10 @@ impl ObjectStore for InMemoryObjectStore {
         let data = data.to_vec();
         let content_type = content_type.map(String::from);
         Box::pin(async move {
-            self.objects.write().await.insert(
-                key,
-                StoredObject {
-                    data,
-                    content_type,
-                },
-            );
+            self.objects
+                .write()
+                .await
+                .insert(key, StoredObject { data, content_type });
             Ok(())
         })
     }

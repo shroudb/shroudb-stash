@@ -146,10 +146,10 @@ mod tests {
     use crate::commands::parse_command;
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
+    use shroudb_crypto::SensitiveBytes;
     use shroudb_stash_engine::capabilities::{Capabilities, DataKeyPair, StashCipherOps};
     use shroudb_stash_engine::engine::StashConfig;
     use shroudb_stash_engine::object_store::InMemoryObjectStore;
-    use shroudb_crypto::SensitiveBytes;
     use std::sync::Arc;
 
     struct MockCipherOps {
@@ -204,8 +204,8 @@ mod tests {
         let engine = setup().await;
 
         let data_b64 = STANDARD.encode(b"hello stash protocol");
-        let cmd = parse_command(&["STORE", "proto-1", &data_b64, "CONTENT_TYPE", "text/plain"])
-            .unwrap();
+        let cmd =
+            parse_command(&["STORE", "proto-1", &data_b64, "CONTENT_TYPE", "text/plain"]).unwrap();
         let resp = dispatch(&engine, cmd, None).await;
         assert!(resp.is_ok(), "store failed: {resp:?}");
 

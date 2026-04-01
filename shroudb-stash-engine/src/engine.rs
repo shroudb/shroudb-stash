@@ -8,9 +8,7 @@ use shroudb_store::Store;
 use crate::capabilities::Capabilities;
 use crate::object_store::ObjectStore;
 use shroudb_stash_core::error::StashError;
-use shroudb_stash_core::metadata::{
-    BlobMetadata, BlobStatus, InspectResult, ViewerMap,
-};
+use shroudb_stash_core::metadata::{BlobMetadata, BlobStatus, InspectResult, ViewerMap};
 
 /// Configuration for the Stash engine.
 #[derive(Debug, Clone)]
@@ -125,9 +123,7 @@ impl<S: Store> StashEngine<S> {
             if client_encrypted {
                 // Client-encrypted passthrough: data is already encrypted.
                 let dek = wrapped_dek.ok_or_else(|| {
-                    StashError::InvalidArgument(
-                        "client_encrypted requires wrapped_dek".into(),
-                    )
+                    StashError::InvalidArgument("client_encrypted requires wrapped_dek".into())
                 })?;
                 let size = data.len() as u64;
                 (data.to_vec(), dek.to_string(), 0, size, size)
@@ -247,7 +243,8 @@ impl<S: Store> StashEngine<S> {
         };
 
         // Audit.
-        self.emit_audit("RETRIEVE", id, EventResult::Ok, actor).await;
+        self.emit_audit("RETRIEVE", id, EventResult::Ok, actor)
+            .await;
 
         Ok(RetrieveResult {
             data,
@@ -579,7 +576,9 @@ mod tests {
             .unwrap()
     }
 
-    fn get_object_store(engine: &StashEngine<shroudb_storage::EmbeddedStore>) -> &InMemoryObjectStore {
+    fn get_object_store(
+        engine: &StashEngine<shroudb_storage::EmbeddedStore>,
+    ) -> &InMemoryObjectStore {
         // We know our test setup uses InMemoryObjectStore.
         let arc: &Arc<dyn ObjectStore> = &engine.object_store;
         let ptr = Arc::as_ptr(arc) as *const InMemoryObjectStore;
