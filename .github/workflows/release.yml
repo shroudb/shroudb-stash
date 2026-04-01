@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    uses: shroudb/.github/.github/workflows/rust-release.yml@main
+    permissions:
+      contents: write
+      packages: write
+    with:
+      product: "stash"
+      server_package: "shroudb-stash-server"
+      server_binary: "shroudb-stash"
+      cli_package: "shroudb-stash-cli"
+      cli_binary: "shroudb-stash-cli"
+      docker_server_target: "shroudb-stash"
+      docker_cli_target: "shroudb-stash-cli"
+      crates: "shroudb-stash-core,shroudb-stash-engine,shroudb-stash-protocol,shroudb-stash-client,shroudb-stash-server,shroudb-stash-cli"
+    secrets:
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
