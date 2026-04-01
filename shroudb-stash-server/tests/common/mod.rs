@@ -19,7 +19,8 @@ struct MockCipherOps {
 impl MockCipherOps {
     fn new() -> Self {
         let mut dek = [0u8; 32];
-        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut dek).unwrap();
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut dek)
+            .expect("CSPRNG failed — system entropy source is broken");
         Self { dek }
     }
 }
