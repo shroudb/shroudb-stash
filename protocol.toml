@@ -1,0 +1,163 @@
+[protocol]
+name = "shroudb-stash"
+version = "0.1.0"
+description = "Encrypted blob storage with S3 backend and envelope encryption"
+
+[protocol.wire_format]
+type = "resp3"
+request_format = "array_of_bulk_strings"
+success_envelope = "json_bulk_string"
+error_envelope = "simple_error"
+
+# ── Commands ──────────────────────────────────────────────────────────
+
+[commands.store]
+description = "Store an encrypted blob"
+syntax = "STORE <id> <data_b64> [KEYRING <name>] [CONTENT_TYPE <mime>] [CLIENT_ENCRYPTED <wrapped_dek>]"
+acl = "namespace:stash.<id>/WRITE"
+
+[commands.store.parameters.id]
+type = "string"
+required = true
+description = "Unique blob identifier"
+
+[commands.store.parameters.data_b64]
+type = "string"
+required = true
+description = "Base64-encoded blob data"
+
+[commands.store.parameters.keyring]
+type = "string"
+required = false
+description = "Cipher keyring name (default: stash-blobs)"
+
+[commands.store.parameters.content_type]
+type = "string"
+required = false
+description = "MIME content type"
+
+[commands.store.parameters.client_encrypted]
+type = "string"
+required = false
+description = "Passthrough mode: value is the wrapped DEK from client-side encryption"
+
+[commands.store.response]
+status = "string"
+id = "string"
+s3_key = "string"
+keyring = "string"
+key_version = "integer"
+plaintext_size = "integer"
+encrypted_size = "integer"
+client_encrypted = "boolean"
+
+[commands.retrieve]
+description = "Retrieve and decrypt a blob"
+syntax = "RETRIEVE <id>"
+acl = "namespace:stash.<id>/READ"
+response_format = "resp3_array"
+response_note = "Returns Array[metadata_json, blob_bytes]"
+
+[commands.retrieve.parameters.id]
+type = "string"
+required = true
+description = "Blob identifier"
+
+[commands.inspect]
+description = "Read blob metadata without downloading or decrypting"
+syntax = "INSPECT <id>"
+acl = "namespace:stash.<id>/READ"
+
+[commands.inspect.parameters.id]
+type = "string"
+required = true
+description = "Blob identifier"
+
+[commands.inspect.response]
+status = "string"
+id = "string"
+blob_status = "string"
+content_type = "string"
+plaintext_size = "integer"
+encrypted_size = "integer"
+keyring = "string"
+key_version = "integer"
+client_encrypted = "boolean"
+viewer_count = "integer"
+created_at = "integer"
+updated_at = "integer"
+
+[commands.revoke]
+description = "Revoke a blob (hard crypto-shred by default, SOFT for soft revoke)"
+syntax = "REVOKE <id> [SOFT]"
+acl = "namespace:stash.<id>/WRITE"
+
+[commands.revoke.parameters.id]
+type = "string"
+required = true
+description = "Blob identifier"
+
+[commands.revoke.parameters.soft]
+type = "flag"
+required = false
+description = "Soft revoke (preserve data, block access)"
+
+[commands.revoke.response]
+status = "string"
+id = "string"
+revoke_mode = "string"
+
+[commands.health]
+description = "Health check"
+syntax = "HEALTH"
+acl = "none"
+
+[commands.ping]
+description = "Ping-pong"
+syntax = "PING"
+acl = "none"
+
+[commands.command]
+description = "List supported commands"
+syntax = "COMMAND"
+acl = "none"
+
+# ── Error codes ───────────────────────────────────────────────────────
+
+[error_codes]
+
+[error_codes.NOTFOUND]
+description = "Blob not found"
+http_equiv = 404
+
+[error_codes.EXISTS]
+description = "Blob already exists with this ID"
+http_equiv = 409
+
+[error_codes.REVOKED]
+description = "Blob has been soft-revoked"
+http_equiv = 403
+
+[error_codes.SHREDDED]
+description = "Blob has been crypto-shredded (unrecoverable)"
+http_equiv = 410
+
+[error_codes.CIPHER_UNAVAILABLE]
+description = "Cipher engine not available for envelope encryption"
+http_equiv = 503
+
+[error_codes.DENIED]
+description = "ABAC policy denied the operation"
+http_equiv = 403
+
+[error_codes.OBJECT_STORE]
+description = "S3 object store operation failed"
+http_equiv = 502
+
+[error_codes.CRYPTO]
+description = "Encryption or decryption failed"
+http_equiv = 500
+
+[error_codes.INVALID_ARGUMENT]
+description = "Invalid argument"
+http_equiv = 400
