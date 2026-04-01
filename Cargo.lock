@@ -2435,9 +2435,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.2.9"
+version = "1.2.12"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "b10c5f421369ab85716317c94bef16fd993829d209dbc7a63e39627b14e8fd7d"
+checksum = "98ebf5ccf86736aeb7f175fcb111690ae021e10b81abec8616b5aa8519b49461"
 dependencies = [
  "serde",
  "serde_json",
@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "base64",
  "serde",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2564,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "base64",
  "ring",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2941,9 +2941,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.1+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "994b95d9e7bae62b34bab0e2a4510b801fa466066a6a8b2b57361fa1eba068ee"
+checksum = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -2965,9 +2965,9 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.1.1+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39ca317ebc49f06bd748bfba29533eac9485569dc9bf80b849024b025e814fb9"
+checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow",
 ]
