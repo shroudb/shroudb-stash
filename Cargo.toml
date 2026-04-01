@@ -32,6 +32,7 @@ shroudb-storage = { version = "0.2.13", registry = "shroudb" }
 shroudb-store = { version = "0.1.2", registry = "shroudb" }
 shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
 shroudb-server-tcp = { version = "0.1.0", registry = "shroudb" }
+shroudb-server-bootstrap = { version = "0.1.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.1.0", registry = "shroudb" }
 
 # Async

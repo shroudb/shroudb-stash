@@ -8,10 +8,6 @@ use clap::Parser;
 use shroudb_stash_engine::capabilities::Capabilities;
 use shroudb_stash_engine::engine::{StashConfig, StashEngine};
 use shroudb_stash_engine::s3::{S3Config, S3ObjectStore};
-use shroudb_storage::{
-    ChainedMasterKeySource, EnvMasterKey, EphemeralKey, FileMasterKey, MasterKeySource,
-    StorageEngineConfig,
-};
 
 use crate::config::load_config;
 
@@ -42,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
     // Load config
     let mut cfg = load_config(cli.config.as_deref())?;
 
-    // Logging
+    // Resolve log level
     let log_level = if cli.log_level != "info" {
         cli.log_level.clone()
     } else {
@@ -51,15 +47,9 @@ async fn main() -> anyhow::Result<()> {
             .take()
             .unwrap_or_else(|| "info".to_string())
     };
-    let filter = tracing_subscriber::EnvFilter::try_new(&log_level)
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .json()
-        .init();
 
-    // Disable core dumps — sensitive key material must not leak to disk.
-    shroudb_crypto::disable_core_dumps();
+    // Bootstrap: logging + core dumps + key source
+    let key_source = shroudb_server_bootstrap::bootstrap(&log_level);
 
     // CLI overrides
     if let Some(ref dir) = cli.data_dir {
@@ -77,25 +67,11 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Master key
-    let key_source: Box<dyn MasterKeySource> = Box::new(ChainedMasterKeySource::new(vec![
-        Box::new(EnvMasterKey::new()),
-        Box::new(FileMasterKey::new()),
-        Box::new(EphemeralKey),
-    ]));
-
     // Storage engine
-    let engine_config = StorageEngineConfig {
-        data_dir: cfg.store.data_dir.clone(),
-        ..Default::default()
-    };
-    let storage_engine = shroudb_storage::StorageEngine::open(engine_config, key_source.as_ref())
+    let storage = shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
         .await
         .context("failed to open storage engine")?;
-    let store = Arc::new(shroudb_storage::EmbeddedStore::new(
-        Arc::new(storage_engine),
-        "stash",
-    ));
+    let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "stash"));
 
     // S3 object store
     let s3_config = S3Config {
@@ -142,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
         tcp::run_tcp(tcp_listener, tcp_engine, tcp_validator, tcp_shutdown).await;
     });
 
-    // Banner
+    // Banner (Stash has extra bucket line)
     eprintln!();
     eprintln!("Stash v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("├─ tcp:     {}", cfg.server.tcp_bind);
@@ -162,11 +138,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("Ready.");
 
     // Wait for shutdown
-    tokio::signal::ctrl_c()
-        .await
-        .context("failed to listen for ctrl-c")?;
-    tracing::info!("shutting down");
-    let _ = shutdown_tx.send(true);
+    shroudb_server_bootstrap::wait_for_shutdown(shutdown_tx).await?;
     let _ = tcp_handle.await;
 
     Ok(())
