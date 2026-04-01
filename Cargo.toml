@@ -16,8 +16,8 @@ publish = ["shroudb"]
 
 [workspace.dependencies]
 # Internal crates
-shroudb-stash-core = { path = "shroudb-stash-core" }
-shroudb-stash-engine = { path = "shroudb-stash-engine" }
+shroudb-stash-core = { path = "shroudb-stash-core", version = "0.1.0", registry = "shroudb" }
+shroudb-stash-engine = { path = "shroudb-stash-engine", version = "0.1.0", registry = "shroudb" }
 
 # Commons
 shroudb-acl = { version = "0.1.4", registry = "shroudb" }
