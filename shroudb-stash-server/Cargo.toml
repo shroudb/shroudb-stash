@@ -1,0 +1,42 @@
+[package]
+name = "shroudb-stash-server"
+description = "TCP server for the Stash encrypted blob storage engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "shroudb-stash"
+path = "src/main.rs"
+
+[dependencies]
+shroudb-stash-core.workspace = true
+shroudb-stash-engine.workspace = true
+shroudb-stash-protocol.workspace = true
+shroudb-acl.workspace = true
+shroudb-store.workspace = true
+shroudb-storage.workspace = true
+shroudb-crypto.workspace = true
+shroudb-protocol-wire.workspace = true
+shroudb-server-tcp.workspace = true
+
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+# S3
+aws-config.workspace = true
+aws-sdk-s3.workspace = true
+
+[dev-dependencies]
+shroudb-stash-client.workspace = true
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+serde_json.workspace = true

@@ -1,10 +1,13 @@
 [workspace]
 resolver = "3"
-default-members = ["shroudb-stash-protocol"]
+default-members = ["shroudb-stash-server"]
 members = [
     "shroudb-stash-core",
     "shroudb-stash-engine",
     "shroudb-stash-protocol",
+    "shroudb-stash-server",
+    "shroudb-stash-client",
+    "shroudb-stash-cli",
 ]
 
 [workspace.package]
@@ -18,6 +21,8 @@ publish = ["shroudb"]
 # Internal crates
 shroudb-stash-core = { path = "shroudb-stash-core", version = "0.1.0", registry = "shroudb" }
 shroudb-stash-engine = { path = "shroudb-stash-engine", version = "0.1.0", registry = "shroudb" }
+shroudb-stash-protocol = { path = "shroudb-stash-protocol", version = "0.1.0", registry = "shroudb" }
+shroudb-stash-client = { path = "shroudb-stash-client", version = "0.1.0", registry = "shroudb" }
 
 # Commons
 shroudb-acl = { version = "0.1.4", registry = "shroudb" }
@@ -25,6 +30,9 @@ shroudb-chronicle-core = { version = "1.2.6", registry = "shroudb" }
 shroudb-crypto = { version = "0.1.2", registry = "shroudb" }
 shroudb-storage = { version = "0.2.13", registry = "shroudb" }
 shroudb-store = { version = "0.1.2", registry = "shroudb" }
+shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
+shroudb-server-tcp = { version = "0.1.0", registry = "shroudb" }
+shroudb-client-common = { version = "0.1.0", registry = "shroudb" }
 
 # Async
 tokio = { version = "1", features = ["full"] }
@@ -32,6 +40,7 @@ tokio = { version = "1", features = ["full"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
 
 # Crypto
 ring = "0.17"
@@ -42,8 +51,15 @@ aws-config = "1"
 aws-sdk-s3 = "1"
 aws-smithy-types = "1"
 
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
 # Utilities
 thiserror = "2"
+anyhow = "1"
 base64 = "0.22"
-tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
