@@ -33,7 +33,7 @@ The key insight: **separating the key from the ciphertext** means compromising S
 | **Metadata in ShrouDB, blobs in S3** | Metadata (wrapped DEK, status, timestamps) lives in the ShrouDB Store with encryption at rest. Blobs live in S3 because the Store isn't designed for multi-GB objects. |
 | **Crypto-shredding over deletion** | Deleting from S3 may not immediately purge all replicas and backups. Destroying the DEK makes all copies unrecoverable regardless of S3's internal retention. |
 | **Client-encrypted passthrough** | Advanced clients that manage their own encryption can use Stash purely for metadata tracking and access control, without Stash seeing plaintext. |
-| **Viewer maps for forensics (v0.2)** | The metadata structure includes viewer→S3 key mappings from day one, enabling future FINGERPRINT functionality without schema migration. |
+| **Viewer maps for forensic watermarking (v0.2)** | The metadata structure includes viewer→S3 key mappings from day one, enabling future FINGERPRINT functionality (per-viewer watermarking for leak tracing) without schema migration. This is forensic attribution, not content deduplication. |
 
 ### Data Flow
 

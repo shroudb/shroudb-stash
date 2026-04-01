@@ -64,7 +64,7 @@ shroudb-stash-cli/        # CLI tool
 ```rust
 pub enum BlobStatus { Active, Revoked, Shredded }
 pub struct BlobMetadata { pub id: String, pub s3_key: String, pub wrapped_dek: String, pub keyring: String, pub key_version: u32, pub content_type: Option<String>, pub plaintext_size: u64, pub encrypted_size: u64, pub client_encrypted: bool, pub status: BlobStatus, pub created_at: u64, pub updated_at: u64 }
-pub struct ViewerRecord { pub viewer_id: String, pub s3_key: String, pub wrapped_dek: String, pub fingerprint_params: serde_json::Value, pub created_at: u64 }
+pub struct ViewerRecord { pub viewer_id: String, pub s3_key: String, pub wrapped_dek: String, pub fingerprint_params: serde_json::Value, pub created_at: u64 }  // forensic watermark copy, not deduplication
 pub struct ViewerMap { pub viewers: Vec<ViewerRecord> }
 pub struct InspectResult { /* fields from BlobMetadata + viewer_count */ }
 pub struct RetrieveResult { pub data: Vec<u8>, pub metadata: BlobMetadata, pub wrapped_dek: Option<String> }
@@ -190,14 +190,14 @@ Stash is used by applications for encrypted file/blob storage:
 - RETRIEVE returns a RESP3 **Array** (not a single BulkString like other engines). The array contains `[metadata_json, blob_bytes]`. Client libraries must handle this format.
 - Hard revoke is irreversible. The wrapped DEK is destroyed — even if the S3 delete fails, the ciphertext is unrecoverable.
 - `CLIENT_ENCRYPTED` mode stores blob as-is. Stash cannot verify the integrity of client-encrypted data.
-- The `ViewerMap` structure exists for v0.2 FINGERPRINT functionality. In v0.1, viewer maps are always empty.
+- The `ViewerMap` structure exists for v0.2 forensic FINGERPRINT functionality (per-viewer watermarking for leak tracing, not deduplication). In v0.1, viewer maps are always empty.
 
 ## Planned (v0.2)
 
 | Command | Description |
 |---------|-------------|
-| `TRACE <id>` | Query access history + fingerprint records from Chronicle/metadata |
-| `FINGERPRINT <id> --viewer <viewer_id>` | Decrypt blob, dispatch to remote processor for watermarking, re-encrypt viewer copy |
+| `TRACE <id>` | Query access history + forensic fingerprint records from Chronicle/metadata |
+| `FINGERPRINT <id> --viewer <viewer_id>` | Forensic watermarking: decrypt blob, dispatch to remote processor to embed a per-viewer watermark, re-encrypt as a viewer-specific copy. Used to trace leaked files back to the viewer who received them — not deduplication. |
 
 ## Related Crates
 
