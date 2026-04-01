@@ -834,4 +834,46 @@ mod tests {
         let result = engine.retrieve_blob("large", None).await.unwrap();
         assert_eq!(result.data, plaintext);
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_concurrent_store_different_keys() {
+        let engine = Arc::new(setup().await);
+
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let eng = engine.clone();
+            handles.push(tokio::spawn(async move {
+                let data = format!("blob-data-{i}");
+                eng.store_blob(StoreBlobParams {
+                    id: &format!("concurrent-{i}"),
+                    data: data.as_bytes(),
+                    content_type: Some("text/plain"),
+                    keyring: None,
+                    client_encrypted: false,
+                    wrapped_dek: None,
+                    actor: None,
+                })
+                .await
+            }));
+        }
+
+        for handle in handles {
+            let meta = handle.await.unwrap().unwrap();
+            assert_eq!(meta.status, BlobStatus::Active);
+        }
+
+        // Verify all blobs are retrievable with correct data.
+        for i in 0..10 {
+            let result = engine
+                .retrieve_blob(&format!("concurrent-{i}"), None)
+                .await
+                .unwrap();
+            let expected = format!("blob-data-{i}");
+            assert_eq!(
+                result.data,
+                expected.as_bytes(),
+                "blob concurrent-{i} data mismatch"
+            );
+        }
+    }
 }
