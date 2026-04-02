@@ -22,6 +22,7 @@ RUN --mount=type=secret,id=registry_token \
 # --- shroudb-stash: encrypted blob storage engine ---
 FROM alpine:3.21 AS shroudb-stash
 RUN adduser -D -u 65532 shroudb && \
+    apk add --no-cache su-exec && \
     mkdir /data && chown shroudb:shroudb /data
 LABEL org.opencontainers.image.title="ShrouDB Stash" \
       org.opencontainers.image.description="Encrypted blob storage engine with S3 backend and envelope encryption" \
@@ -30,11 +31,13 @@ LABEL org.opencontainers.image.title="ShrouDB Stash" \
       org.opencontainers.image.source="https://github.com/shroudb/shroudb-stash" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
 COPY --from=builder /out/shroudb-stash /shroudb-stash
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 VOLUME /data
 WORKDIR /data
-USER shroudb
 EXPOSE 6699
-ENTRYPOINT ["/shroudb-stash"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["/shroudb-stash"]
 
 # --- shroudb-stash-cli: CLI tool ---
 FROM alpine:3.21 AS shroudb-stash-cli
