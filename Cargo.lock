@@ -2447,9 +2447,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-crypto"
-version = "0.1.2"
+version = "0.1.3"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "f6759687677659a3a9f4b71972f665eba6be704b4cb370c47ee98682f03ce36f"
+checksum = "999e3aa8bfd9d76d57580e96fd6722d2cdba51c74f6198b7ea618dc70a4f1f1c"
 dependencies = [
  "argon2",
  "base62",
@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64",
  "serde",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2564,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64",
  "ring",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "aws-config",
