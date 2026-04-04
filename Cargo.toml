@@ -25,13 +25,13 @@ shroudb-stash-protocol = { path = "shroudb-stash-protocol", version = "0.1.5", r
 shroudb-stash-client = { path = "shroudb-stash-client", version = "0.1.5", registry = "shroudb" }
 
 # Commons
-shroudb-acl = { version = "0.1.5", registry = "shroudb" }
+shroudb-acl = { version = "0.2.0", registry = "shroudb" }
 shroudb-chronicle-core = { version = "1.2.6", registry = "shroudb" }
 shroudb-crypto = { version = "0.1.2", registry = "shroudb" }
 shroudb-storage = { version = "0.2.13", registry = "shroudb" }
 shroudb-store = { version = "0.1.2", registry = "shroudb" }
 shroudb-protocol-wire = { version = "0.1.0", registry = "shroudb" }
-shroudb-server-tcp = { version = "0.1.0", registry = "shroudb" }
+shroudb-server-tcp = { version = "0.1.2", registry = "shroudb" }
 shroudb-server-bootstrap = { version = "0.1.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.1.0", registry = "shroudb" }
 

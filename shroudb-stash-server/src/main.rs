@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // Auth
-    let token_validator = config::build_token_validator(&cfg.auth);
+    let token_validator = cfg.auth.build_validator();
     if token_validator.is_some() {
         tracing::info!(tokens = cfg.auth.tokens.len(), "token-based auth enabled");
     }

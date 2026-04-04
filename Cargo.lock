@@ -672,9 +672,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.58"
+version = "1.2.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1e928d4b69e3077709075a938a05ffbedfa53a84c8f766efbf8220bb1ff60e1"
+checksum = "b7a4d3ec6524d28a329fc53654bbadc9bdd7b0431f5d65f1a56ffb28a1ee5283"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1550,9 +1550,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.13.0"
+version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
+checksum = "45a8a2b9cb3e0b0c1803dbb0758ffac5de2f425b23c28f518faabd9d805342ff"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
@@ -2329,9 +2329,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.27"
+version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"
@@ -2424,9 +2424,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shroudb-acl"
-version = "0.1.5"
+version = "0.2.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "790d153413e9fc8a96baad182fbf6a060fa60bd9acf27413d0069f73dfef2a3c"
+checksum = "b048bf3922e7e12bf1520c78bc4d4a24d55e2a4e3a9775843d762b8c9122de9c"
 dependencies = [
  "serde",
  "shroudb-crypto",
@@ -2435,9 +2435,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.2.16"
+version = "1.2.17"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "276bd411b458db6a28266b53a92f4d69450f092ba8f481cad2f9b43f2bbf59dd"
+checksum = "1a7840f8763849c0caaa8e2e35fa70d118f01395ec02142527fce560e74ccbdb"
 dependencies = [
  "serde",
  "serde_json",
@@ -2495,9 +2495,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-server-tcp"
-version = "0.1.0"
+version = "0.1.2"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "595bfdc92325ca901e5af7ef05f92510a4793b26149791da395abcf6441f3bb5"
+checksum = "33304baff81283cda04f6d3fef293495a72e7156310289ed54a4ed189e4ab3c7"
 dependencies = [
  "serde_json",
  "shroudb-acl",
@@ -2880,9 +2880,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.50.0"
+version = "1.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
+checksum = "2bd1c4c0fc4a7ab90fc15ef6daaa3ec3b893f004f915f2392557ed23237820cd"
 dependencies = [
  "bytes",
  "libc",
@@ -2897,9 +2897,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.6.1"
+version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
+checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3465,9 +3465,9 @@ dependencies = [
 
 [[package]]
 name = "writeable"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
+checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xmlparser"
