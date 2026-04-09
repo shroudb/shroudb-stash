@@ -39,6 +39,16 @@ impl StashCipherOps for MockCipherOps {
     fn unwrap_data_key(&self, _wrapped_key: &str) -> BoxFut<'_, SensitiveBytes> {
         Box::pin(async move { Ok(SensitiveBytes::new(self.dek.to_vec())) })
     }
+
+    fn rewrap_data_key(&self, _old_wrapped_key: &str) -> BoxFut<'_, DataKeyPair> {
+        Box::pin(async move {
+            Ok(DataKeyPair {
+                plaintext_key: SensitiveBytes::new(self.dek.to_vec()),
+                wrapped_key: STANDARD.encode(b"mock-rewrapped-dek"),
+                key_version: 2,
+            })
+        })
+    }
 }
 
 /// Test server configuration.

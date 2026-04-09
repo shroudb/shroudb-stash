@@ -98,6 +98,9 @@ s3_key_prefix = "stash/"                  # optional prefix for S3 keys
 shroudb-stash-core/     — BlobMetadata, BlobStatus, StashError, ViewerRecord
 shroudb-stash-engine/   — StashEngine, ObjectStore trait, S3 + InMemory impls, local AES-256-GCM
 shroudb-stash-protocol/ — RESP3 command parsing, dispatch, response types
+shroudb-stash-server/   — TCP binary
+shroudb-stash-client/   — Rust client SDK
+shroudb-stash-cli/      — CLI tool
 ```
 
 ## Cipher-less Mode

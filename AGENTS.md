@@ -16,7 +16,7 @@
 shroudb-stash-core/       # Domain types: BlobMetadata, BlobStatus, StashError, ViewerRecord
 shroudb-stash-engine/     # Store + ObjectStore logic, AES-256-GCM blob encryption, capabilities
 shroudb-stash-protocol/   # RESP3 command parsing + dispatch
-shroudb-stash-server/     # Standalone TCP binary
+shroudb-stash-server/     # Standalone TCP binary (port 6699)
 shroudb-stash-client/     # Typed Rust SDK
 shroudb-stash-cli/        # CLI tool
 ```

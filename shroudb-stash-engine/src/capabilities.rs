@@ -39,6 +39,13 @@ pub trait StashCipherOps: Send + Sync {
     /// The returned `SensitiveBytes` contains the plaintext DEK and will be
     /// zeroized on drop.
     fn unwrap_data_key(&self, wrapped_key: &str) -> BoxFut<'_, SensitiveBytes>;
+
+    /// Re-wrap a DEK under the current active key version. Unwraps the old
+    /// wrapped key, then wraps the plaintext DEK with the keyring's current key.
+    ///
+    /// Returns a new `DataKeyPair` with the updated `wrapped_key` and `key_version`.
+    /// The blob ciphertext is NOT re-encrypted — only the wrapping changes.
+    fn rewrap_data_key(&self, old_wrapped_key: &str) -> BoxFut<'_, DataKeyPair>;
 }
 
 /// Engine capabilities provided at construction time.

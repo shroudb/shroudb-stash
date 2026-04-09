@@ -28,6 +28,11 @@ pub enum StashCommand {
         id: String,
     },
 
+    /// Re-wrap a blob's DEK under the current Cipher key version.
+    Rewrap {
+        id: String,
+    },
+
     /// Revoke a blob (hard crypto-shred by default, --soft for soft revoke).
     Revoke {
         id: String,
@@ -51,13 +56,13 @@ impl StashCommand {
             | StashCommand::CommandList => AclRequirement::None,
 
             // Write operations
-            StashCommand::Store { id, .. } | StashCommand::Revoke { id, .. } => {
-                AclRequirement::Namespace {
-                    ns: format!("stash.{id}"),
-                    scope: Scope::Write,
-                    tenant_override: None,
-                }
-            }
+            StashCommand::Store { id, .. }
+            | StashCommand::Rewrap { id }
+            | StashCommand::Revoke { id, .. } => AclRequirement::Namespace {
+                ns: format!("stash.{id}"),
+                scope: Scope::Write,
+                tenant_override: None,
+            },
 
             // Read operations
             StashCommand::Retrieve { id } | StashCommand::Inspect { id } => {
@@ -83,6 +88,14 @@ pub fn parse_command(args: &[&str]) -> Result<StashCommand, String> {
         "STORE" => parse_store(args),
         "RETRIEVE" => parse_retrieve(args),
         "INSPECT" => parse_inspect(args),
+        "REWRAP" => {
+            if args.len() < 2 {
+                return Err("REWRAP <id>".into());
+            }
+            Ok(StashCommand::Rewrap {
+                id: args[1].to_string(),
+            })
+        }
         "REVOKE" => parse_revoke(args),
         "HEALTH" => Ok(StashCommand::Health),
         "PING" => Ok(StashCommand::Ping),

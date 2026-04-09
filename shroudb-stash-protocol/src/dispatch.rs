@@ -10,6 +10,7 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "STORE",
     "RETRIEVE",
     "INSPECT",
+    "REWRAP",
     "REVOKE",
     "HEALTH",
     "PING",
@@ -123,6 +124,16 @@ pub async fn dispatch<S: Store>(
             Err(e) => StashResponse::error(e.to_string()),
         },
 
+        StashCommand::Rewrap { id } => match engine.rewrap_blob(&id, actor).await {
+            Ok(meta) => StashResponse::ok(serde_json::json!({
+                "status": "ok",
+                "id": meta.id,
+                "key_version": meta.key_version,
+                "updated_at": meta.updated_at,
+            })),
+            Err(e) => StashResponse::error(e.to_string()),
+        },
+
         // ── Operational ───────────────────────────────────────────────
         StashCommand::Health => StashResponse::ok(serde_json::json!({
             "status": "ok",
@@ -181,6 +192,19 @@ mod tests {
             _wrapped_key: &str,
         ) -> shroudb_stash_engine::capabilities::BoxFut<'_, SensitiveBytes> {
             Box::pin(async move { Ok(SensitiveBytes::new(self.dek.to_vec())) })
+        }
+
+        fn rewrap_data_key(
+            &self,
+            _old_wrapped_key: &str,
+        ) -> shroudb_stash_engine::capabilities::BoxFut<'_, DataKeyPair> {
+            Box::pin(async move {
+                Ok(DataKeyPair {
+                    plaintext_key: SensitiveBytes::new(self.dek.to_vec()),
+                    wrapped_key: STANDARD.encode(b"mock-rewrapped-dek"),
+                    key_version: 2,
+                })
+            })
         }
     }
 

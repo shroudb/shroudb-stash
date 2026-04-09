@@ -87,6 +87,22 @@ viewer_count = "integer"
 created_at = "integer"
 updated_at = "integer"
 
+[commands.rewrap]
+description = "Re-wrap a blob's DEK under the current Cipher key version. The blob ciphertext is not re-encrypted — only the key wrapping changes."
+syntax = "REWRAP <id>"
+acl = "namespace:stash.<id>/WRITE"
+
+[commands.rewrap.parameters.id]
+type = "string"
+required = true
+description = "Blob identifier"
+
+[commands.rewrap.response]
+status = "string"
+id = "string"
+key_version = "integer"
+updated_at = "integer"
+
 [commands.revoke]
 description = "Revoke a blob (hard crypto-shred by default, SOFT for soft revoke)"
 syntax = "REVOKE <id> [SOFT]"

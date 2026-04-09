@@ -17,13 +17,20 @@ pub struct StashConfig {
     pub default_keyring: String,
     /// Optional prefix for S3 object keys (e.g. "stash/").
     pub s3_key_prefix: Option<String>,
+    /// Blobs larger than this threshold (in bytes) use chunked streaming
+    /// encryption to bound memory usage. Default: 10 MB. Set to 0 to disable.
+    pub streaming_threshold_bytes: usize,
 }
+
+/// Default streaming threshold: 10 MB.
+const DEFAULT_STREAMING_THRESHOLD: usize = 10 * 1024 * 1024;
 
 impl Default for StashConfig {
     fn default() -> Self {
         Self {
             default_keyring: "stash-blobs".into(),
             s3_key_prefix: None,
+            streaming_threshold_bytes: DEFAULT_STREAMING_THRESHOLD,
         }
     }
 }
@@ -132,7 +139,17 @@ impl<S: Store> StashEngine<S> {
                 let dek_pair = cipher.generate_data_key(Some(256)).await?;
                 let plaintext_key = dek_pair.plaintext_key;
 
-                let ciphertext = crate::crypto::encrypt_blob(plaintext_key.as_bytes(), data)?;
+                let use_streaming = self.config.streaming_threshold_bytes > 0
+                    && data.len() > self.config.streaming_threshold_bytes;
+                let ciphertext = if use_streaming {
+                    crate::crypto::encrypt_blob_chunked(
+                        plaintext_key.as_bytes(),
+                        data,
+                        id.as_bytes(),
+                    )?
+                } else {
+                    crate::crypto::encrypt_blob(plaintext_key.as_bytes(), data, id.as_bytes())?
+                };
                 // plaintext_key dropped here → SensitiveBytes auto-zeroizes
 
                 let pt_size = data.len() as u64;
@@ -238,7 +255,28 @@ impl<S: Store> StashEngine<S> {
             // Server-side decryption: unwrap DEK via Cipher, decrypt locally.
             let plaintext_key = cipher.unwrap_data_key(&metadata.wrapped_dek).await?;
 
-            let plaintext = crate::crypto::decrypt_blob(plaintext_key.as_bytes(), &encrypted_data)?;
+            let plaintext = if crate::crypto::is_chunked(&encrypted_data) {
+                crate::crypto::decrypt_blob_chunked(
+                    plaintext_key.as_bytes(),
+                    &encrypted_data,
+                    id.as_bytes(),
+                )?
+            } else {
+                // Use compat decryption to handle blobs encrypted before
+                // AAD binding was added (empty AAD fallback).
+                let (data, used_legacy) = crate::crypto::decrypt_blob_compat(
+                    plaintext_key.as_bytes(),
+                    &encrypted_data,
+                    id.as_bytes(),
+                )?;
+                if used_legacy {
+                    tracing::warn!(
+                        blob_id = id,
+                        "blob was encrypted without AAD binding — re-store to upgrade"
+                    );
+                }
+                data
+            };
             // plaintext_key dropped here → SensitiveBytes auto-zeroizes
 
             (plaintext, None)
@@ -279,6 +317,58 @@ impl<S: Store> StashEngine<S> {
         self.emit_audit("INSPECT", id, EventResult::Ok, actor).await;
 
         Ok(InspectResult::from((&metadata, viewer_count)))
+    }
+
+    // ── REWRAP ─────────────────────────────────────────────────────────
+
+    /// Re-wrap a blob's DEK under the current Cipher key version.
+    ///
+    /// The blob ciphertext in S3 is NOT re-encrypted — only the wrapped DEK
+    /// in metadata is updated. This is useful after a Cipher key rotation to
+    /// migrate blobs to the new key version.
+    pub async fn rewrap_blob(
+        &self,
+        id: &str,
+        actor: Option<&str>,
+    ) -> Result<BlobMetadata, StashError> {
+        let mut metadata = self.load_metadata(id).await?;
+
+        match metadata.status {
+            BlobStatus::Active => {}
+            BlobStatus::Revoked => return Err(StashError::Revoked { id: id.into() }),
+            BlobStatus::Shredded => return Err(StashError::Shredded { id: id.into() }),
+        }
+
+        if metadata.client_encrypted {
+            return Err(StashError::InvalidArgument(
+                "cannot rewrap client-encrypted blob — client manages key material".into(),
+            ));
+        }
+
+        if metadata.wrapped_dek.is_empty() {
+            return Err(StashError::InvalidArgument(
+                "blob has no wrapped DEK (stored without encryption)".into(),
+            ));
+        }
+
+        self.check_policy(id, "REWRAP", actor).await?;
+
+        let cipher = self
+            .capabilities
+            .cipher
+            .as_ref()
+            .ok_or(StashError::CipherUnavailable)?;
+
+        let new_pair = cipher.rewrap_data_key(&metadata.wrapped_dek).await?;
+        metadata.wrapped_dek = new_pair.wrapped_key;
+        metadata.key_version = new_pair.key_version;
+        metadata.updated_at = now_ms();
+
+        self.save_metadata(&metadata).await?;
+
+        self.emit_audit("REWRAP", id, EventResult::Ok, actor).await;
+
+        Ok(metadata)
     }
 
     // ── REVOKE ─────────────────────────────────────────────────────────
@@ -485,6 +575,7 @@ impl<S: Store> StashEngine<S> {
         let event = Event::new(
             ChronicleEngine::Stash,
             operation.to_string(),
+            "blob".to_string(),
             resource.to_string(),
             result,
             actor.unwrap_or("anonymous").to_string(),
@@ -563,6 +654,20 @@ mod tests {
             _wrapped_key: &str,
         ) -> crate::capabilities::BoxFut<'_, SensitiveBytes> {
             Box::pin(async move { Ok(SensitiveBytes::new(self.dek.to_vec())) })
+        }
+
+        fn rewrap_data_key(
+            &self,
+            _old_wrapped_key: &str,
+        ) -> crate::capabilities::BoxFut<'_, DataKeyPair> {
+            Box::pin(async move {
+                Ok(DataKeyPair {
+                    plaintext_key: SensitiveBytes::new(self.dek.to_vec()),
+                    wrapped_key: base64::engine::general_purpose::STANDARD
+                        .encode(b"mock-rewrapped-dek"),
+                    key_version: 2,
+                })
+            })
         }
     }
 
@@ -770,6 +875,7 @@ mod tests {
         let config = StashConfig {
             default_keyring: "stash-blobs".into(),
             s3_key_prefix: Some("my-prefix/".into()),
+            ..Default::default()
         };
 
         let engine = StashEngine::new(store_kv, obj_store.clone(), caps, config)
@@ -876,5 +982,140 @@ mod tests {
                 "blob concurrent-{i} data mismatch"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn large_blob_uses_chunked_path_and_roundtrips() {
+        // Configure a very low streaming threshold so we exercise the chunked path
+        let store_kv = shroudb_storage::test_util::create_test_store("stash-chunked").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let mock_cipher = MockCipherOps::new();
+        let caps = Capabilities {
+            cipher: Some(Box::new(mock_cipher)),
+            sentry: None,
+            chronicle: None,
+        };
+        let config = StashConfig {
+            streaming_threshold_bytes: 100, // very low: 100 bytes
+            ..Default::default()
+        };
+        let engine = StashEngine::new(store_kv, obj_store.clone(), caps, config)
+            .await
+            .unwrap();
+
+        // Store a blob larger than the threshold → forces chunked encryption
+        let plaintext = vec![0xABu8; 500]; // 500 bytes > 100 byte threshold
+        store(&engine, "chunked-blob", &plaintext, None)
+            .await
+            .unwrap();
+
+        // The encrypted data in S3 should start with the chunked version byte
+        let encrypted = obj_store.get("chunked-blob").await.unwrap();
+        assert!(
+            crate::crypto::is_chunked(&encrypted),
+            "blob should use chunked encryption format"
+        );
+
+        // Retrieve should auto-detect chunked format and decrypt correctly
+        let result = engine.retrieve_blob("chunked-blob", None).await.unwrap();
+        assert_eq!(result.data, plaintext, "chunked decrypt roundtrip failed");
+    }
+
+    #[tokio::test]
+    async fn small_blob_uses_standard_path() {
+        let store_kv = shroudb_storage::test_util::create_test_store("stash-standard").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let mock_cipher = MockCipherOps::new();
+        let caps = Capabilities {
+            cipher: Some(Box::new(mock_cipher)),
+            sentry: None,
+            chronicle: None,
+        };
+        let config = StashConfig {
+            streaming_threshold_bytes: 1000, // threshold above our blob size
+            ..Default::default()
+        };
+        let engine = StashEngine::new(store_kv, obj_store.clone(), caps, config)
+            .await
+            .unwrap();
+
+        let plaintext = b"small blob data";
+        store(&engine, "small-blob", plaintext, None).await.unwrap();
+
+        // Should NOT be chunked
+        let encrypted = obj_store.get("small-blob").await.unwrap();
+        assert!(
+            !crate::crypto::is_chunked(&encrypted),
+            "small blob should use standard encryption"
+        );
+
+        let result = engine.retrieve_blob("small-blob", None).await.unwrap();
+        assert_eq!(result.data, plaintext);
+    }
+
+    // ── REWRAP tests ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn rewrap_updates_wrapped_dek_and_key_version() {
+        let engine = setup().await;
+        let plaintext = b"rewrap-test-data";
+
+        store(&engine, "rw-1", plaintext, None).await.unwrap();
+
+        // Inspect before rewrap
+        let before = engine.inspect_blob("rw-1", None).await.unwrap();
+        assert_eq!(before.key_version, 1);
+
+        // Rewrap
+        let meta = engine.rewrap_blob("rw-1", None).await.unwrap();
+        assert_eq!(meta.key_version, 2, "key_version should be updated");
+
+        // Inspect after rewrap confirms version changed
+        let after = engine.inspect_blob("rw-1", None).await.unwrap();
+        assert_eq!(after.key_version, 2);
+
+        // Data is still retrievable with same plaintext
+        let result = engine.retrieve_blob("rw-1", None).await.unwrap();
+        assert_eq!(result.data, plaintext, "plaintext should be unchanged");
+    }
+
+    #[tokio::test]
+    async fn rewrap_client_encrypted_rejected() {
+        let engine = setup().await;
+
+        // Store a client-encrypted blob
+        let data_b64 = base64::engine::general_purpose::STANDARD.encode(b"client-data");
+        engine
+            .store_blob(StoreBlobParams {
+                id: "ce-rw",
+                data: data_b64.as_bytes(),
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some("client-wrapped-dek"),
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        // Rewrap should fail — client manages key material
+        let err = engine.rewrap_blob("ce-rw", None).await;
+        assert!(err.is_err(), "rewrap on client-encrypted should fail");
+    }
+
+    #[tokio::test]
+    async fn rewrap_nonexistent_fails() {
+        let engine = setup().await;
+        let err = engine.rewrap_blob("nope", None).await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn rewrap_revoked_fails() {
+        let engine = setup().await;
+        store(&engine, "revoked-rw", b"data", None).await.unwrap();
+        engine.revoke_blob("revoked-rw", true, None).await.unwrap(); // soft revoke
+        let err = engine.rewrap_blob("revoked-rw", None).await;
+        assert!(err.is_err(), "rewrap on revoked blob should fail");
     }
 }

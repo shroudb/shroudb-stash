@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
     let stash_config = StashConfig {
         default_keyring: cfg.engine.keyring.clone(),
         s3_key_prefix: cfg.engine.s3_key_prefix.clone(),
+        ..Default::default()
     };
     let capabilities = Capabilities::default();
     let engine = Arc::new(
