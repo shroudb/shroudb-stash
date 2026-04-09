@@ -20,6 +20,15 @@ pub struct StashConfig {
     /// Blobs larger than this threshold (in bytes) use chunked streaming
     /// encryption to bound memory usage. Default: 10 MB. Set to 0 to disable.
     pub streaming_threshold_bytes: usize,
+    /// Whether to validate client-encrypted blob integrity on STORE.
+    ///
+    /// When `true` (the default), Stash validates:
+    /// - The wrapped DEK is valid base64 encoding
+    /// - The wrapped DEK decodes to at least 32 bytes (AES-256 key + wrapping overhead)
+    /// - The ciphertext is at least 28 bytes (12-byte nonce + 16-byte auth tag)
+    ///
+    /// Set to `false` only when clients use a non-AES-256-GCM encryption scheme.
+    pub validate_client_encrypted: bool,
 }
 
 /// Default streaming threshold: 10 MB.
@@ -31,6 +40,7 @@ impl Default for StashConfig {
             default_keyring: "stash-blobs".into(),
             s3_key_prefix: None,
             streaming_threshold_bytes: DEFAULT_STREAMING_THRESHOLD,
+            validate_client_encrypted: true,
         }
     }
 }
@@ -132,6 +142,11 @@ impl<S: Store> StashEngine<S> {
                 let dek = wrapped_dek.ok_or_else(|| {
                     StashError::InvalidArgument("client_encrypted requires wrapped_dek".into())
                 })?;
+
+                if self.config.validate_client_encrypted {
+                    Self::validate_client_encrypted_blob(dek, data)?;
+                }
+
                 let size = data.len() as u64;
                 (data.to_vec(), dek.to_string(), 0, size, size)
             } else if let Some(cipher) = self.capabilities.cipher.as_ref() {
@@ -559,6 +574,48 @@ impl<S: Store> StashEngine<S> {
         }
     }
 
+    /// Validate a client-encrypted blob's wrapped DEK and ciphertext format.
+    ///
+    /// Checks:
+    /// - `wrapped_dek` is valid base64
+    /// - Decoded wrapped DEK is at least 32 bytes (AES-256 key + wrapping overhead)
+    /// - Ciphertext is at least `MIN_CIPHERTEXT_LEN` bytes (nonce + auth tag)
+    fn validate_client_encrypted_blob(
+        wrapped_dek: &str,
+        ciphertext: &[u8],
+    ) -> Result<(), StashError> {
+        use base64::Engine as _;
+
+        // Validate wrapped DEK is valid base64.
+        let decoded_dek = base64::engine::general_purpose::STANDARD
+            .decode(wrapped_dek)
+            .map_err(|e| {
+                StashError::InvalidArgument(format!("wrapped_dek is not valid base64: {e}"))
+            })?;
+
+        // A wrapped AES-256 key must be at least 32 bytes (the raw key itself)
+        // plus wrapping overhead. In practice, Cipher CiphertextEnvelopes are
+        // significantly larger, but 32 bytes is the absolute minimum.
+        const MIN_WRAPPED_DEK_LEN: usize = 32;
+        if decoded_dek.len() < MIN_WRAPPED_DEK_LEN {
+            return Err(StashError::InvalidArgument(format!(
+                "wrapped_dek too short: {} bytes (minimum {MIN_WRAPPED_DEK_LEN})",
+                decoded_dek.len()
+            )));
+        }
+
+        // Ciphertext must contain at least a nonce and an auth tag.
+        if ciphertext.len() < crate::crypto::MIN_CIPHERTEXT_LEN {
+            return Err(StashError::InvalidArgument(format!(
+                "client-encrypted ciphertext too short: {} bytes (minimum {})",
+                ciphertext.len(),
+                crate::crypto::MIN_CIPHERTEXT_LEN
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Emit an audit event to Chronicle (fire-and-forget).
     async fn emit_audit(
         &self,
@@ -716,6 +773,18 @@ mod tests {
             .await
     }
 
+    /// Generate a valid wrapped DEK for client-encrypted tests.
+    /// Returns a base64-encoded string of 48 bytes (enough to pass validation).
+    fn valid_wrapped_dek() -> String {
+        base64::engine::general_purpose::STANDARD.encode([0xAA; 48])
+    }
+
+    /// Generate valid fake ciphertext for client-encrypted tests.
+    /// Returns a byte vec of the specified length (must be >= MIN_CIPHERTEXT_LEN).
+    fn valid_ciphertext(len: usize) -> Vec<u8> {
+        vec![0xBB; len]
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -741,17 +810,17 @@ mod tests {
     #[tokio::test]
     async fn store_client_encrypted_passthrough() {
         let engine = setup().await;
-        let ciphertext = b"client-encrypted-blob";
-        let wrapped_dek = "client-provided-wrapped-dek";
+        let ciphertext = valid_ciphertext(64);
+        let wrapped_dek = valid_wrapped_dek();
 
         let meta = engine
             .store_blob(StoreBlobParams {
                 id: "ce-1",
-                data: ciphertext,
+                data: &ciphertext,
                 content_type: Some("application/octet-stream"),
                 keyring: None,
                 client_encrypted: true,
-                wrapped_dek: Some(wrapped_dek),
+                wrapped_dek: Some(&wrapped_dek),
                 actor: None,
             })
             .await
@@ -762,7 +831,7 @@ mod tests {
 
         let result = engine.retrieve_blob("ce-1", None).await.unwrap();
         assert_eq!(result.data, ciphertext);
-        assert_eq!(result.wrapped_dek.as_deref(), Some(wrapped_dek));
+        assert_eq!(result.wrapped_dek.as_deref(), Some(wrapped_dek.as_str()));
     }
 
     #[tokio::test]
@@ -1083,16 +1152,17 @@ mod tests {
     async fn rewrap_client_encrypted_rejected() {
         let engine = setup().await;
 
-        // Store a client-encrypted blob
-        let data_b64 = base64::engine::general_purpose::STANDARD.encode(b"client-data");
+        // Store a client-encrypted blob with valid wrapped DEK and ciphertext
+        let ciphertext = valid_ciphertext(64);
+        let wrapped_dek = valid_wrapped_dek();
         engine
             .store_blob(StoreBlobParams {
                 id: "ce-rw",
-                data: data_b64.as_bytes(),
+                data: &ciphertext,
                 content_type: None,
                 keyring: None,
                 client_encrypted: true,
-                wrapped_dek: Some("client-wrapped-dek"),
+                wrapped_dek: Some(&wrapped_dek),
                 actor: None,
             })
             .await
@@ -1117,5 +1187,171 @@ mod tests {
         engine.revoke_blob("revoked-rw", true, None).await.unwrap(); // soft revoke
         let err = engine.rewrap_blob("revoked-rw", None).await;
         assert!(err.is_err(), "rewrap on revoked blob should fail");
+    }
+
+    // ── Client-encrypted validation tests ────────────────────────────
+
+    #[tokio::test]
+    async fn client_encrypted_rejects_invalid_base64_dek() {
+        let engine = setup().await;
+        let ciphertext = valid_ciphertext(64);
+
+        let err = engine
+            .store_blob(StoreBlobParams {
+                id: "ce-bad-b64",
+                data: &ciphertext,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some("not!!!valid===base64"),
+                actor: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, StashError::InvalidArgument(_)));
+        assert!(
+            err.to_string().contains("not valid base64"),
+            "error should mention base64: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_encrypted_rejects_short_dek() {
+        let engine = setup().await;
+        let ciphertext = valid_ciphertext(64);
+        // 16 bytes encoded as base64 — below the 32-byte minimum
+        let short_dek = base64::engine::general_purpose::STANDARD.encode([0xCC; 16]);
+
+        let err = engine
+            .store_blob(StoreBlobParams {
+                id: "ce-short-dek",
+                data: &ciphertext,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some(&short_dek),
+                actor: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, StashError::InvalidArgument(_)));
+        assert!(
+            err.to_string().contains("too short"),
+            "error should mention too short: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_encrypted_rejects_short_ciphertext() {
+        let engine = setup().await;
+        let wrapped_dek = valid_wrapped_dek();
+        // 10 bytes is less than MIN_CIPHERTEXT_LEN (28)
+        let short_ct = vec![0xDD; 10];
+
+        let err = engine
+            .store_blob(StoreBlobParams {
+                id: "ce-short-ct",
+                data: &short_ct,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some(&wrapped_dek),
+                actor: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, StashError::InvalidArgument(_)));
+        assert!(
+            err.to_string().contains("ciphertext too short"),
+            "error should mention ciphertext: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_encrypted_validation_disabled_accepts_anything() {
+        let store_kv = shroudb_storage::test_util::create_test_store("stash-no-validate-ce").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let mock_cipher = MockCipherOps::new();
+        let caps = Capabilities {
+            cipher: Some(Box::new(mock_cipher)),
+            sentry: None,
+            chronicle: None,
+        };
+        let config = StashConfig {
+            validate_client_encrypted: false,
+            ..Default::default()
+        };
+        let engine = StashEngine::new(store_kv, obj_store, caps, config)
+            .await
+            .unwrap();
+
+        // Should succeed even with non-base64 DEK and tiny ciphertext
+        let meta = engine
+            .store_blob(StoreBlobParams {
+                id: "ce-novalidate",
+                data: b"tiny",
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some("not-base64-at-all"),
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(meta.client_encrypted);
+    }
+
+    #[tokio::test]
+    async fn client_encrypted_exact_minimum_ciphertext_accepted() {
+        let engine = setup().await;
+        let wrapped_dek = valid_wrapped_dek();
+        // Exactly MIN_CIPHERTEXT_LEN bytes — should be accepted
+        let ct = valid_ciphertext(crate::crypto::MIN_CIPHERTEXT_LEN);
+
+        let meta = engine
+            .store_blob(StoreBlobParams {
+                id: "ce-min-ct",
+                data: &ct,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some(&wrapped_dek),
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(meta.client_encrypted);
+        assert_eq!(
+            meta.plaintext_size,
+            crate::crypto::MIN_CIPHERTEXT_LEN as u64
+        );
+    }
+
+    #[tokio::test]
+    async fn client_encrypted_exact_minimum_dek_accepted() {
+        let engine = setup().await;
+        let ciphertext = valid_ciphertext(64);
+        // Exactly 32 bytes encoded — should be accepted
+        let min_dek = base64::engine::general_purpose::STANDARD.encode([0xEE; 32]);
+
+        let meta = engine
+            .store_blob(StoreBlobParams {
+                id: "ce-min-dek",
+                data: &ciphertext,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some(&min_dek),
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(meta.client_encrypted);
     }
 }

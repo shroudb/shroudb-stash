@@ -3,11 +3,16 @@ use ring::rand::{SecureRandom, SystemRandom};
 use shroudb_stash_core::error::StashError;
 
 /// AES-256-GCM nonce size in bytes.
-const NONCE_LEN: usize = 12;
+pub const NONCE_LEN: usize = 12;
 /// AES-256-GCM tag size in bytes.
-const TAG_LEN: usize = 16;
+pub const TAG_LEN: usize = 16;
 /// Required DEK size for AES-256-GCM.
 const KEY_LEN: usize = 32;
+
+/// Minimum valid ciphertext size: nonce + authentication tag.
+/// Any AES-256-GCM ciphertext (even for zero-length plaintext) must contain
+/// at least a 12-byte nonce and a 16-byte authentication tag.
+pub const MIN_CIPHERTEXT_LEN: usize = NONCE_LEN + TAG_LEN;
 
 /// Encrypt a plaintext blob using AES-256-GCM with a random nonce.
 ///

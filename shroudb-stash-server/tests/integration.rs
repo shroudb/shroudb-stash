@@ -1,5 +1,6 @@
 mod common;
 
+use base64::Engine as _;
 use common::*;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -239,8 +240,11 @@ async fn test_client_encrypted_passthrough() {
         .await
         .expect("connect failed");
 
-    let ciphertext = b"client-side-encrypted-blob-content";
-    let wrapped_dek = "client-provided-wrapped-dek-abc123";
+    // Valid ciphertext: at least 28 bytes (12-byte nonce + 16-byte auth tag)
+    let ciphertext = &[0xAA; 64];
+    // Valid wrapped DEK: base64-encoded, at least 32 bytes decoded
+    let wrapped_dek_str = base64::engine::general_purpose::STANDARD.encode([0xBB; 48]);
+    let wrapped_dek = wrapped_dek_str.as_str();
 
     let store_result = client
         .store_client_encrypted(
@@ -264,6 +268,46 @@ async fn test_client_encrypted_passthrough() {
     // Inspect should show client_encrypted.
     let info = client.inspect("ce-1").await.expect("inspect failed");
     assert!(info.client_encrypted);
+}
+
+#[tokio::test]
+async fn test_client_encrypted_rejects_invalid_dek() {
+    let server = TestServer::start().await;
+    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    let ciphertext = &[0xAA; 64];
+
+    // Non-base64 wrapped DEK should be rejected
+    let err = client
+        .store_client_encrypted("ce-bad", ciphertext, "not!!!valid===base64", None)
+        .await;
+    assert!(err.is_err(), "should reject non-base64 wrapped DEK");
+
+    // Too-short wrapped DEK should be rejected (16 bytes < 32 minimum)
+    let short_dek = base64::engine::general_purpose::STANDARD.encode([0xCC; 16]);
+    let err = client
+        .store_client_encrypted("ce-short-dek", ciphertext, &short_dek, None)
+        .await;
+    assert!(err.is_err(), "should reject too-short wrapped DEK");
+}
+
+#[tokio::test]
+async fn test_client_encrypted_rejects_short_ciphertext() {
+    let server = TestServer::start().await;
+    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
+        .await
+        .expect("connect failed");
+
+    let valid_dek = base64::engine::general_purpose::STANDARD.encode([0xBB; 48]);
+
+    // 10 bytes is less than 28-byte minimum (nonce + tag)
+    let short_ct = &[0xDD; 10];
+    let err = client
+        .store_client_encrypted("ce-short-ct", short_ct, &valid_dek, None)
+        .await;
+    assert!(err.is_err(), "should reject too-short ciphertext");
 }
 
 // ═══════════════════════════════════════════════════════════════════════

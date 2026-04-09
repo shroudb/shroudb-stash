@@ -39,7 +39,7 @@ description = "MIME content type"
 [commands.store.parameters.client_encrypted]
 type = "string"
 required = false
-description = "Passthrough mode: value is the wrapped DEK from client-side encryption"
+description = "Passthrough mode: value is the base64-encoded wrapped DEK from client-side encryption. When validation is enabled (default), the wrapped DEK must be valid base64 decoding to at least 32 bytes, and the blob data must be at least 28 bytes (AES-256-GCM nonce + auth tag)."
 
 [commands.store.response]
 status = "string"
