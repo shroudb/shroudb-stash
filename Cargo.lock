@@ -213,9 +213,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-s3"
-version = "1.128.0"
+version = "1.129.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99304b64672e0d81a3c100a589b93d9ef5e9c0ce12e21c848fd39e50f493c2a1"
+checksum = "6d4e8410fadbc0ee453145dd77a4958227b18b05bf67c2795d0a8b8596c9aa0f"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1014,9 +1014,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.3.0"
+version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ff"
@@ -2435,9 +2435,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.2.17"
+version = "1.3.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "1a7840f8763849c0caaa8e2e35fa70d118f01395ec02142527fce560e74ccbdb"
+checksum = "5e980a9f0ce453ed8a8b070bc9f3368fd1f5ddf5c59f086f3c76cbe319bd98e5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2447,9 +2447,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-crypto"
-version = "0.1.3"
+version = "0.1.4"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "999e3aa8bfd9d76d57580e96fd6722d2cdba51c74f6198b7ea618dc70a4f1f1c"
+checksum = "45c6685b945af28ff305e987f17f68e9f7ba4d2f97cc5a6f4bd2c0dd85245d40"
 dependencies = [
  "argon2",
  "base62",
@@ -2481,9 +2481,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-server-bootstrap"
-version = "0.1.0"
+version = "0.1.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "2e04864c6d1cb99aa6249465ea2baa6343bf30bf69b9432eb017e755ce774d10"
+checksum = "4dfdd289b1f465a5a5672eee79234465fa8155ff049c8603e4b89fe6e550cbb8"
 dependencies = [
  "anyhow",
  "shroudb-crypto",
@@ -2508,7 +2508,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "base64",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "serde",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2564,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "ring",
@@ -2582,7 +2582,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2611,9 +2611,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-storage"
-version = "0.2.15"
+version = "0.2.17"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "c9b08b0124790519fa8679e6e56feaa5d6d791d4373f2045fa07e78ae94dc671"
+checksum = "37eac376af24371a09cfb5948ab25ff60d5018290b07278818001aa39c54a728"
 dependencies = [
  "crc32fast",
  "dashmap",
@@ -2636,9 +2636,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-store"
-version = "0.1.2"
+version = "0.1.3"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "0694dcb4e2f2736fd129dcffda5f6c95e6e442cb5511276490808a17b9591e33"
+checksum = "c402c01f3aaaeccb235afd2f4c8a565c6f375f6db9dc28597435eb4d0f9bcd71"
 dependencies = [
  "serde",
  "serde_json",
@@ -2880,9 +2880,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.51.0"
+version = "1.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd1c4c0fc4a7ab90fc15ef6daaa3ec3b893f004f915f2392557ed23237820cd"
+checksum = "f66bf9585cda4b724d3e78ab34b73fb2bbaba9011b9bfdf69dc836382ea13b8c"
 dependencies = [
  "bytes",
  "libc",
