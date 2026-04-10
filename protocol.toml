@@ -50,6 +50,8 @@ key_version = "integer"
 plaintext_size = "integer"
 encrypted_size = "integer"
 client_encrypted = "boolean"
+content_hash = "string|null"
+deduplicated = "boolean"
 
 [commands.retrieve]
 description = "Retrieve and decrypt a blob"

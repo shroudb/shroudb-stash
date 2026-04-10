@@ -52,6 +52,8 @@ impl Default for StashConfig {
 const META_NS: &str = "stash.meta";
 /// Store namespace for viewer maps.
 const VIEWER_NS: &str = "stash.viewers";
+/// Store namespace for deduplication records.
+const DEDUP_NS: &str = "stash.dedup";
 
 /// Parameters for a STORE operation.
 pub struct StoreBlobParams<'a> {
@@ -63,6 +65,24 @@ pub struct StoreBlobParams<'a> {
     pub client_encrypted: bool,
     pub wrapped_dek: Option<&'a str>,
     pub actor: Option<&'a str>,
+}
+
+/// Internal dedup tracking record stored in the dedup namespace.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DedupRecord {
+    canonical_id: String,
+    s3_key: String,
+    wrapped_dek: String,
+    keyring: String,
+    key_version: u32,
+    reference_count: u32,
+}
+
+/// Result of a STORE operation, returned to the protocol layer.
+#[derive(Debug)]
+pub struct StoreResult {
+    pub metadata: BlobMetadata,
+    pub deduplicated: bool,
 }
 
 /// The Stash engine: encrypted blob storage backed by an object store.
@@ -85,7 +105,7 @@ impl<S: Store> StashEngine<S> {
     ) -> Result<Self, StashError> {
         // Ensure namespaces exist.
         let ns_config = shroudb_store::NamespaceConfig::default();
-        for ns in [META_NS, VIEWER_NS] {
+        for ns in [META_NS, VIEWER_NS, DEDUP_NS] {
             match store.namespace_create(ns, ns_config.clone()).await {
                 Ok(()) => tracing::debug!(namespace = ns, "created stash namespace"),
                 Err(shroudb_store::StoreError::NamespaceExists(_)) => {}
@@ -114,10 +134,12 @@ impl<S: Store> StashEngine<S> {
     ///
     /// Otherwise, Stash generates a DEK via Cipher, encrypts the blob
     /// locally with AES-256-GCM, and uploads the ciphertext to the object store.
-    pub async fn store_blob(
-        &self,
-        params: StoreBlobParams<'_>,
-    ) -> Result<BlobMetadata, StashError> {
+    ///
+    /// Content-addressed deduplication: for server-encrypted blobs, Stash
+    /// computes a SHA-256 hash of the plaintext. If identical content already
+    /// exists for the same tenant, the new blob becomes a metadata-only
+    /// reference sharing the existing S3 object and wrapped DEK.
+    pub async fn store_blob(&self, params: StoreBlobParams<'_>) -> Result<StoreResult, StashError> {
         let StoreBlobParams {
             tenant,
             id,
@@ -140,6 +162,58 @@ impl<S: Store> StashEngine<S> {
         let keyring = keyring.unwrap_or(&self.config.default_keyring);
         let s3_key = self.s3_key(tenant, id);
         let now = now_ms();
+
+        // Compute content hash for dedup (server-encrypted blobs only).
+        let content_hash = if !client_encrypted {
+            Some(crate::crypto::hash_plaintext(data))
+        } else {
+            None
+        };
+
+        // Check for dedup opportunity (tenant-scoped, server-encrypted only).
+        if let Some(ref hash) = content_hash
+            && let Some(mut dedup) = self.load_dedup_record(tenant, hash).await
+        {
+            // Dedup hit: create a reference blob sharing the canonical's S3 object.
+            dedup.reference_count += 1;
+            self.save_dedup_record(tenant, hash, &dedup).await?;
+
+            let metadata = BlobMetadata {
+                id: id.to_string(),
+                tenant_id: tenant.to_string(),
+                s3_key: dedup.s3_key.clone(),
+                wrapped_dek: dedup.wrapped_dek.clone(),
+                keyring: dedup.keyring.clone(),
+                key_version: dedup.key_version,
+                content_type: content_type.map(String::from),
+                plaintext_size: data.len() as u64,
+                encrypted_size: 0, // no new S3 object
+                client_encrypted: false,
+                status: BlobStatus::Active,
+                created_at: now,
+                updated_at: now,
+                content_hash: Some(hash.clone()),
+                canonical_id: Some(dedup.canonical_id.clone()),
+            };
+
+            self.save_metadata(&metadata).await?;
+            self.save_viewer_map(tenant, id, &ViewerMap::default())
+                .await?;
+
+            self.emit_audit("STORE", tenant, id, EventResult::Ok, actor)
+                .await;
+
+            tracing::info!(
+                blob_id = id,
+                canonical_id = %dedup.canonical_id,
+                "blob stored (deduplicated)"
+            );
+
+            return Ok(StoreResult {
+                metadata,
+                deduplicated: true,
+            });
+        }
 
         let (upload_data, final_wrapped_dek, key_version, plaintext_size, encrypted_size) =
             if client_encrypted {
@@ -201,7 +275,7 @@ impl<S: Store> StashEngine<S> {
             id: id.to_string(),
             tenant_id: tenant.to_string(),
             s3_key: s3_key.clone(),
-            wrapped_dek: final_wrapped_dek,
+            wrapped_dek: final_wrapped_dek.clone(),
             keyring: keyring.to_string(),
             key_version,
             content_type: content_type.map(String::from),
@@ -211,9 +285,24 @@ impl<S: Store> StashEngine<S> {
             status: BlobStatus::Active,
             created_at: now,
             updated_at: now,
+            content_hash: content_hash.clone(),
+            canonical_id: None,
         };
 
         self.save_metadata(&metadata).await?;
+
+        // Create dedup record for server-encrypted blobs.
+        if let Some(ref hash) = content_hash {
+            let dedup = DedupRecord {
+                canonical_id: id.to_string(),
+                s3_key: s3_key.clone(),
+                wrapped_dek: final_wrapped_dek,
+                keyring: keyring.to_string(),
+                key_version,
+                reference_count: 1,
+            };
+            self.save_dedup_record(tenant, hash, &dedup).await?;
+        }
 
         // Initialize empty viewer map.
         self.save_viewer_map(tenant, id, &ViewerMap::default())
@@ -231,7 +320,10 @@ impl<S: Store> StashEngine<S> {
             "blob stored"
         );
 
-        Ok(metadata)
+        Ok(StoreResult {
+            metadata,
+            deduplicated: false,
+        })
     }
 
     // ── RETRIEVE ───────────────────────────────────────────────────────
@@ -273,6 +365,10 @@ impl<S: Store> StashEngine<S> {
             .await
             .map_err(|e| StashError::ObjectStore(e.to_string()))?;
 
+        // For dedup references, the S3 object was encrypted with the
+        // canonical blob's ID as AAD. Use the canonical ID for decryption.
+        let aad_id = metadata.canonical_id.as_deref().unwrap_or(id);
+
         let (data, returned_dek) = if metadata.client_encrypted {
             // Client-encrypted: return raw data + wrapped DEK for client-side decryption.
             (encrypted_data, Some(metadata.wrapped_dek.clone()))
@@ -288,7 +384,7 @@ impl<S: Store> StashEngine<S> {
                 crate::crypto::decrypt_blob_chunked(
                     plaintext_key.as_bytes(),
                     &encrypted_data,
-                    id.as_bytes(),
+                    aad_id.as_bytes(),
                 )?
             } else {
                 // Use compat decryption to handle blobs encrypted before
@@ -296,7 +392,7 @@ impl<S: Store> StashEngine<S> {
                 let (data, used_legacy) = crate::crypto::decrypt_blob_compat(
                     plaintext_key.as_bytes(),
                     &encrypted_data,
-                    id.as_bytes(),
+                    aad_id.as_bytes(),
                 )?;
                 if used_legacy {
                     tracing::warn!(
@@ -471,8 +567,50 @@ impl<S: Store> StashEngine<S> {
                 }
             }
 
-            // 2. Delete master S3 object.
-            if let Err(e) = self.object_store.delete(&metadata.s3_key).await {
+            // 2. Handle dedup-aware S3 object and DEK cleanup.
+            let mut should_delete_s3 = true;
+            let mut should_delete_dedup = false;
+
+            if let Some(ref hash) = metadata.content_hash
+                && let Some(mut dedup) = self.load_dedup_record(tenant, hash).await
+            {
+                dedup.reference_count = dedup.reference_count.saturating_sub(1);
+
+                if metadata.canonical_id.is_some() {
+                    // This blob is a reference — never delete the S3 object
+                    // (it belongs to the canonical blob).
+                    should_delete_s3 = false;
+
+                    if dedup.reference_count == 0
+                        && let Ok(canonical_meta) =
+                            self.load_metadata(tenant, &dedup.canonical_id).await
+                        && canonical_meta.status == BlobStatus::Shredded
+                    {
+                        // Both canonical and all references are gone.
+                        should_delete_s3 = true;
+                        should_delete_dedup = true;
+                    }
+
+                    self.save_dedup_record(tenant, hash, &dedup).await?;
+                } else {
+                    // This blob IS the canonical.
+                    if dedup.reference_count > 0 {
+                        // Other references still need the S3 object.
+                        should_delete_s3 = false;
+                    } else {
+                        // No more references — safe to clean up everything.
+                        should_delete_dedup = true;
+                    }
+
+                    self.save_dedup_record(tenant, hash, &dedup).await?;
+                }
+
+                if should_delete_dedup {
+                    self.delete_dedup_record(tenant, hash).await?;
+                }
+            }
+
+            if should_delete_s3 && let Err(e) = self.object_store.delete(&metadata.s3_key).await {
                 tracing::warn!(
                     blob_id = id,
                     error = %e,
@@ -750,6 +888,53 @@ impl<S: Store> StashEngine<S> {
             .put(VIEWER_NS, &key, &value, None)
             .await
             .map_err(|e| StashError::Store(format!("save viewer map: {e}")))?;
+        Ok(())
+    }
+
+    // ── Dedup helpers ──────────────────────────────────────────────────
+
+    /// Build the tenant-scoped Store key for a dedup record.
+    fn dedup_key(tenant: &str, content_hash: &str) -> Vec<u8> {
+        format!("{tenant}:{content_hash}").into_bytes()
+    }
+
+    /// Load a dedup record from the Store.
+    async fn load_dedup_record(&self, tenant: &str, content_hash: &str) -> Option<DedupRecord> {
+        let key = Self::dedup_key(tenant, content_hash);
+        match self.store.get(DEDUP_NS, &key, None).await {
+            Ok(entry) => serde_json::from_slice(&entry.value).ok(),
+            Err(_) => None,
+        }
+    }
+
+    /// Persist a dedup record to the Store.
+    async fn save_dedup_record(
+        &self,
+        tenant: &str,
+        content_hash: &str,
+        record: &DedupRecord,
+    ) -> Result<(), StashError> {
+        let key = Self::dedup_key(tenant, content_hash);
+        let value = serde_json::to_vec(record)
+            .map_err(|e| StashError::Internal(format!("serialize dedup: {e}")))?;
+        self.store
+            .put(DEDUP_NS, &key, &value, None)
+            .await
+            .map_err(|e| StashError::Store(format!("save dedup: {e}")))?;
+        Ok(())
+    }
+
+    /// Delete a dedup record from the Store.
+    async fn delete_dedup_record(
+        &self,
+        tenant: &str,
+        content_hash: &str,
+    ) -> Result<(), StashError> {
+        let key = Self::dedup_key(tenant, content_hash);
+        self.store
+            .delete(DEDUP_NS, &key)
+            .await
+            .map_err(|e| StashError::Store(format!("delete dedup: {e}")))?;
         Ok(())
     }
 
@@ -1043,6 +1228,7 @@ mod tests {
                 actor: None,
             })
             .await
+            .map(|r| r.metadata)
     }
 
     /// Generate a valid wrapped DEK for client-encrypted tests.
@@ -1088,7 +1274,7 @@ mod tests {
         let ciphertext = valid_ciphertext(64);
         let wrapped_dek = valid_wrapped_dek();
 
-        let meta = engine
+        let result = engine
             .store_blob(StoreBlobParams {
                 tenant: TEST_TENANT,
                 id: "ce-1",
@@ -1101,6 +1287,7 @@ mod tests {
             })
             .await
             .unwrap();
+        let meta = result.metadata;
 
         assert!(meta.client_encrypted);
         assert_eq!(meta.wrapped_dek, wrapped_dek);
@@ -1360,8 +1547,8 @@ mod tests {
         }
 
         for handle in handles {
-            let meta = handle.await.unwrap().unwrap();
-            assert_eq!(meta.status, BlobStatus::Active);
+            let result = handle.await.unwrap().unwrap();
+            assert_eq!(result.metadata.status, BlobStatus::Active);
         }
 
         // Verify all blobs are retrievable with correct data.
@@ -1643,7 +1830,7 @@ mod tests {
             .unwrap();
 
         // Should succeed even with non-base64 DEK and tiny ciphertext
-        let meta = engine
+        let result = engine
             .store_blob(StoreBlobParams {
                 tenant: TEST_TENANT,
                 id: "ce-novalidate",
@@ -1657,7 +1844,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(meta.client_encrypted);
+        assert!(result.metadata.client_encrypted);
     }
 
     #[tokio::test]
@@ -1667,7 +1854,7 @@ mod tests {
         // Exactly MIN_CIPHERTEXT_LEN bytes — should be accepted
         let ct = valid_ciphertext(crate::crypto::MIN_CIPHERTEXT_LEN);
 
-        let meta = engine
+        let result = engine
             .store_blob(StoreBlobParams {
                 tenant: TEST_TENANT,
                 id: "ce-min-ct",
@@ -1681,9 +1868,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(meta.client_encrypted);
+        assert!(result.metadata.client_encrypted);
         assert_eq!(
-            meta.plaintext_size,
+            result.metadata.plaintext_size,
             crate::crypto::MIN_CIPHERTEXT_LEN as u64
         );
     }
@@ -1695,7 +1882,7 @@ mod tests {
         // Exactly 32 bytes encoded — should be accepted
         let min_dek = base64::engine::general_purpose::STANDARD.encode([0xEE; 32]);
 
-        let meta = engine
+        let result = engine
             .store_blob(StoreBlobParams {
                 tenant: TEST_TENANT,
                 id: "ce-min-dek",
@@ -1709,6 +1896,263 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(meta.client_encrypted);
+        assert!(result.metadata.client_encrypted);
+    }
+
+    // ── Dedup tests ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn dedup_identical_blobs_share_s3() {
+        let engine = setup().await;
+        let data = b"identical content for dedup";
+
+        let r1 = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "dedup-1",
+                data,
+                content_type: Some("text/plain"),
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+        assert!(!r1.deduplicated);
+        assert!(r1.metadata.content_hash.is_some());
+        assert!(r1.metadata.canonical_id.is_none());
+
+        let r2 = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "dedup-2",
+                data,
+                content_type: Some("text/plain"),
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+        assert!(r2.deduplicated);
+        assert_eq!(r2.metadata.content_hash, r1.metadata.content_hash);
+        assert_eq!(r2.metadata.canonical_id.as_deref(), Some("dedup-1"));
+        assert_eq!(r2.metadata.s3_key, r1.metadata.s3_key);
+    }
+
+    #[tokio::test]
+    async fn dedup_retrieve_reference() {
+        let engine = setup().await;
+        let data = b"dedup retrieve test";
+
+        store(&engine, "dedup-r1", data, None).await.unwrap();
+        let r2 = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "dedup-r2",
+                data,
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+        assert!(r2.deduplicated);
+
+        // Retrieve the reference blob — should return the same plaintext.
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "dedup-r2", None)
+            .await
+            .unwrap();
+        assert_eq!(result.data, data);
+    }
+
+    #[tokio::test]
+    async fn dedup_revoke_reference_preserves_canonical() {
+        let engine = setup().await;
+        let data = b"dedup revoke ref test";
+
+        store(&engine, "dedup-rev-1", data, None).await.unwrap();
+        engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "dedup-rev-2",
+                data,
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        // Revoke the reference.
+        engine
+            .revoke_blob(TEST_TENANT, "dedup-rev-2", false, None)
+            .await
+            .unwrap();
+
+        // Canonical blob should still be retrievable.
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "dedup-rev-1", None)
+            .await
+            .unwrap();
+        assert_eq!(result.data, data);
+
+        // Reference should be shredded.
+        let info = engine
+            .inspect_blob(TEST_TENANT, "dedup-rev-2", None)
+            .await
+            .unwrap();
+        assert_eq!(info.status, BlobStatus::Shredded);
+    }
+
+    #[tokio::test]
+    async fn dedup_revoke_canonical_with_references() {
+        let engine = setup().await;
+        let data = b"dedup revoke canonical test";
+
+        store(&engine, "dedup-can-1", data, None).await.unwrap();
+        engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "dedup-can-2",
+                data,
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        // Revoke the canonical.
+        engine
+            .revoke_blob(TEST_TENANT, "dedup-can-1", false, None)
+            .await
+            .unwrap();
+
+        // Canonical should be shredded.
+        let info = engine
+            .inspect_blob(TEST_TENANT, "dedup-can-1", None)
+            .await
+            .unwrap();
+        assert_eq!(info.status, BlobStatus::Shredded);
+
+        // Reference should still be retrievable — S3 object preserved.
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "dedup-can-2", None)
+            .await
+            .unwrap();
+        assert_eq!(result.data, data);
+    }
+
+    #[tokio::test]
+    async fn dedup_different_content_no_dedup() {
+        let engine = setup().await;
+
+        let r1 = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "diff-1",
+                data: b"content-A",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+        assert!(!r1.deduplicated);
+
+        let r2 = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "diff-2",
+                data: b"content-B",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+        assert!(!r2.deduplicated);
+        assert_ne!(r1.metadata.content_hash, r2.metadata.content_hash);
+        assert_ne!(r1.metadata.s3_key, r2.metadata.s3_key);
+    }
+
+    #[tokio::test]
+    async fn dedup_cross_tenant_no_dedup() {
+        let engine = setup().await;
+        let data = b"same content different tenant";
+
+        engine
+            .store_blob(StoreBlobParams {
+                tenant: "tenant-a",
+                id: "cross-1",
+                data,
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        let r2 = engine
+            .store_blob(StoreBlobParams {
+                tenant: "tenant-b",
+                id: "cross-1",
+                data,
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        // Should NOT be deduplicated — different tenants.
+        assert!(!r2.deduplicated);
+        assert!(r2.metadata.canonical_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn dedup_client_encrypted_skipped() {
+        let engine = setup().await;
+        let data = b"same data for client encrypted";
+
+        // Store a server-encrypted blob.
+        store(&engine, "ce-dedup-1", data, None).await.unwrap();
+
+        // Store the same data as client-encrypted — should NOT dedup.
+        let ciphertext = valid_ciphertext(64);
+        let wrapped_dek = valid_wrapped_dek();
+        let r2 = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "ce-dedup-2",
+                data: &ciphertext,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some(&wrapped_dek),
+                actor: None,
+            })
+            .await
+            .unwrap();
+        assert!(!r2.deduplicated);
+        assert!(r2.metadata.content_hash.is_none());
     }
 }

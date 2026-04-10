@@ -1,6 +1,8 @@
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+use ring::digest::{SHA256, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 use shroudb_stash_core::error::StashError;
+use std::fmt::Write;
 
 /// AES-256-GCM nonce size in bytes.
 pub const NONCE_LEN: usize = 12;
@@ -293,6 +295,16 @@ pub fn decrypt_blob_chunked(
     }
 
     Ok(plaintext)
+}
+
+/// Compute SHA-256 hash of plaintext, returned as hex string.
+pub fn hash_plaintext(plaintext: &[u8]) -> String {
+    let d = digest(&SHA256, plaintext);
+    let mut hex = String::with_capacity(d.as_ref().len() * 2);
+    for byte in d.as_ref() {
+        write!(hex, "{byte:02x}").expect("hex formatting cannot fail");
+    }
+    hex
 }
 
 /// Check if ciphertext uses the chunked streaming format.

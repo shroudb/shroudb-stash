@@ -53,6 +53,13 @@ pub struct BlobMetadata {
     pub created_at: u64,
     /// Unix timestamp (ms) of the last status change.
     pub updated_at: u64,
+    /// SHA-256 hash of the plaintext (hex). Used for deduplication.
+    #[serde(default)]
+    pub content_hash: Option<String>,
+    /// If this blob is a dedup reference, the ID of the canonical blob
+    /// that holds the actual S3 object and DEK.
+    #[serde(default)]
+    pub canonical_id: Option<String>,
 }
 
 /// Record of a fingerprinted viewer copy (populated by FINGERPRINT in v0.2).
@@ -188,6 +195,8 @@ mod tests {
             status: BlobStatus::Active,
             created_at: 1700000000000,
             updated_at: 1700000000000,
+            content_hash: None,
+            canonical_id: None,
         };
         let json = serde_json::to_string(&meta).unwrap();
         let parsed: BlobMetadata = serde_json::from_str(&json).unwrap();
@@ -233,10 +242,36 @@ mod tests {
             status: BlobStatus::Active,
             created_at: 1000,
             updated_at: 2000,
+            content_hash: None,
+            canonical_id: None,
         };
         let result = InspectResult::from((&meta, 3));
         assert_eq!(result.id, "test");
         assert_eq!(result.viewer_count, 3);
         assert_eq!(result.key_version, 2);
+    }
+
+    #[test]
+    fn blob_metadata_backward_compat_without_dedup_fields() {
+        // JSON without content_hash and canonical_id should deserialize with defaults.
+        let json = r#"{
+            "id": "old-blob",
+            "tenant_id": "",
+            "s3_key": "stash/old-blob",
+            "wrapped_dek": "dek",
+            "keyring": "stash-blobs",
+            "key_version": 1,
+            "content_type": null,
+            "plaintext_size": 100,
+            "encrypted_size": 128,
+            "client_encrypted": false,
+            "status": "active",
+            "created_at": 1000,
+            "updated_at": 1000
+        }"#;
+        let meta: BlobMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, "old-blob");
+        assert!(meta.content_hash.is_none());
+        assert!(meta.canonical_id.is_none());
     }
 }

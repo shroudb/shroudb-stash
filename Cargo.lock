@@ -2521,7 +2521,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2533,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "serde",
@@ -2544,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2553,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2577,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "ring",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "aws-config",

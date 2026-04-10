@@ -1,5 +1,5 @@
 use shroudb_acl::AuthContext;
-use shroudb_stash_engine::engine::{StashEngine, StoreBlobParams};
+use shroudb_stash_engine::engine::{StashEngine, StoreBlobParams, StoreResult};
 use shroudb_store::Store;
 
 use crate::commands::StashCommand;
@@ -62,7 +62,10 @@ pub async fn dispatch<S: Store>(
                 })
                 .await
             {
-                Ok(meta) => StashResponse::ok(serde_json::json!({
+                Ok(StoreResult {
+                    metadata: meta,
+                    deduplicated,
+                }) => StashResponse::ok(serde_json::json!({
                     "status": "ok",
                     "id": meta.id,
                     "s3_key": meta.s3_key,
@@ -71,6 +74,8 @@ pub async fn dispatch<S: Store>(
                     "plaintext_size": meta.plaintext_size,
                     "encrypted_size": meta.encrypted_size,
                     "client_encrypted": meta.client_encrypted,
+                    "content_hash": meta.content_hash,
+                    "deduplicated": deduplicated,
                 })),
                 Err(e) => StashResponse::error(e.to_string()),
             }
