@@ -112,11 +112,26 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("failed to bind TCP")?;
 
+    let tls_acceptor = cfg
+        .server
+        .tls
+        .as_ref()
+        .map(shroudb_server_tcp::build_tls_acceptor)
+        .transpose()
+        .context("failed to build TLS acceptor")?;
+
     let tcp_engine = engine.clone();
     let tcp_validator = token_validator.clone();
     let tcp_shutdown = shutdown_rx.clone();
     let tcp_handle = tokio::spawn(async move {
-        tcp::run_tcp(tcp_listener, tcp_engine, tcp_validator, tcp_shutdown).await;
+        tcp::run_tcp(
+            tcp_listener,
+            tcp_engine,
+            tcp_validator,
+            tcp_shutdown,
+            tls_acceptor,
+        )
+        .await;
     });
 
     // Banner (Stash has extra bucket line)

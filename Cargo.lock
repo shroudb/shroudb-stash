@@ -1439,7 +1439,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2188,7 +2188,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki 0.103.10",
  "subtle",
@@ -2501,20 +2503,25 @@ dependencies = [
 
 [[package]]
 name = "shroudb-server-tcp"
-version = "0.1.2"
+version = "0.2.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "33304baff81283cda04f6d3fef293495a72e7156310289ed54a4ed189e4ab3c7"
+checksum = "6726004b1af9bfb9875a2e463a034d03185929a9de75996b0d71a8ca98c16289"
 dependencies = [
+ "anyhow",
+ "rustls 0.23.37",
+ "rustls-pki-types",
+ "serde",
  "serde_json",
  "shroudb-acl",
  "shroudb-protocol-wire",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
 ]
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "base64",
@@ -2526,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "base64",
  "serde",
@@ -2537,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "serde",
  "serde_json",
@@ -2546,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2570,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "base64",
  "ring",
@@ -2588,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2611,6 +2618,7 @@ dependencies = [
  "shroudb-store",
  "tempfile",
  "tokio",
+ "tokio-rustls 0.26.4",
  "toml",
  "tracing",
 ]

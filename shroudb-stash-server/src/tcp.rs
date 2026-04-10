@@ -77,13 +77,15 @@ pub async fn run_tcp(
     engine: Arc<StashEngine<shroudb_storage::EmbeddedStore>>,
     token_validator: Option<Arc<dyn TokenValidator>>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) {
-    shroudb_server_tcp::run_tcp(
+    shroudb_server_tcp::run_tcp_tls(
         listener,
         engine,
         Arc::new(StashProtocol),
         token_validator,
         shutdown_rx,
+        tls_acceptor,
     )
     .await;
 }
