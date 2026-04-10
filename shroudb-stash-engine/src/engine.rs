@@ -52,6 +52,7 @@ const VIEWER_NS: &str = "stash.viewers";
 
 /// Parameters for a STORE operation.
 pub struct StoreBlobParams<'a> {
+    pub tenant: &'a str,
     pub id: &'a str,
     pub data: &'a [u8],
     pub content_type: Option<&'a str>,
@@ -115,6 +116,7 @@ impl<S: Store> StashEngine<S> {
         params: StoreBlobParams<'_>,
     ) -> Result<BlobMetadata, StashError> {
         let StoreBlobParams {
+            tenant,
             id,
             data,
             content_type,
@@ -125,15 +127,15 @@ impl<S: Store> StashEngine<S> {
         } = params;
 
         // Check for duplicate.
-        if self.load_metadata(id).await.is_ok() {
+        if self.load_metadata(tenant, id).await.is_ok() {
             return Err(StashError::AlreadyExists { id: id.into() });
         }
 
         // Check ABAC policy.
-        self.check_policy(id, "STORE", actor).await?;
+        self.check_policy(tenant, id, "STORE", actor).await?;
 
         let keyring = keyring.unwrap_or(&self.config.default_keyring);
-        let s3_key = self.s3_key(id);
+        let s3_key = self.s3_key(tenant, id);
         let now = now_ms();
 
         let (upload_data, final_wrapped_dek, key_version, plaintext_size, encrypted_size) =
@@ -194,6 +196,7 @@ impl<S: Store> StashEngine<S> {
         // Persist metadata in Store.
         let metadata = BlobMetadata {
             id: id.to_string(),
+            tenant_id: tenant.to_string(),
             s3_key: s3_key.clone(),
             wrapped_dek: final_wrapped_dek,
             keyring: keyring.to_string(),
@@ -210,10 +213,12 @@ impl<S: Store> StashEngine<S> {
         self.save_metadata(&metadata).await?;
 
         // Initialize empty viewer map.
-        self.save_viewer_map(id, &ViewerMap::default()).await?;
+        self.save_viewer_map(tenant, id, &ViewerMap::default())
+            .await?;
 
         // Audit.
-        self.emit_audit("STORE", id, EventResult::Ok, actor).await;
+        self.emit_audit("STORE", tenant, id, EventResult::Ok, actor)
+            .await;
 
         tracing::info!(
             blob_id = id,
@@ -237,10 +242,16 @@ impl<S: Store> StashEngine<S> {
     /// the plaintext.
     pub async fn retrieve_blob(
         &self,
+        tenant: &str,
         id: &str,
         actor: Option<&str>,
     ) -> Result<RetrieveResult, StashError> {
-        let metadata = self.load_metadata(id).await?;
+        let metadata = self.load_metadata(tenant, id).await?;
+
+        // Fail-closed: if tenant doesn't match, return NotFound to avoid leaking blob existence.
+        if metadata.tenant_id != tenant {
+            return Err(StashError::NotFound { id: id.into() });
+        }
 
         // Check status.
         match metadata.status {
@@ -250,7 +261,7 @@ impl<S: Store> StashEngine<S> {
         }
 
         // Check ABAC policy.
-        self.check_policy(id, "RETRIEVE", actor).await?;
+        self.check_policy(tenant, id, "RETRIEVE", actor).await?;
 
         // Download encrypted blob from S3.
         let encrypted_data = self
@@ -301,7 +312,7 @@ impl<S: Store> StashEngine<S> {
         };
 
         // Audit.
-        self.emit_audit("RETRIEVE", id, EventResult::Ok, actor)
+        self.emit_audit("RETRIEVE", tenant, id, EventResult::Ok, actor)
             .await;
 
         Ok(RetrieveResult {
@@ -318,18 +329,25 @@ impl<S: Store> StashEngine<S> {
     /// No S3 access, no Cipher interaction. Pure metadata read.
     pub async fn inspect_blob(
         &self,
+        tenant: &str,
         id: &str,
         actor: Option<&str>,
     ) -> Result<InspectResult, StashError> {
-        let metadata = self.load_metadata(id).await?;
+        let metadata = self.load_metadata(tenant, id).await?;
+
+        // Fail-closed: if tenant doesn't match, return NotFound to avoid leaking blob existence.
+        if metadata.tenant_id != tenant {
+            return Err(StashError::NotFound { id: id.into() });
+        }
 
         // Check ABAC policy.
-        self.check_policy(id, "INSPECT", actor).await?;
+        self.check_policy(tenant, id, "INSPECT", actor).await?;
 
-        let viewer_map = self.load_viewer_map(id).await.unwrap_or_default();
+        let viewer_map = self.load_viewer_map(tenant, id).await.unwrap_or_default();
         let viewer_count = viewer_map.len();
 
-        self.emit_audit("INSPECT", id, EventResult::Ok, actor).await;
+        self.emit_audit("INSPECT", tenant, id, EventResult::Ok, actor)
+            .await;
 
         Ok(InspectResult::from((&metadata, viewer_count)))
     }
@@ -343,10 +361,16 @@ impl<S: Store> StashEngine<S> {
     /// migrate blobs to the new key version.
     pub async fn rewrap_blob(
         &self,
+        tenant: &str,
         id: &str,
         actor: Option<&str>,
     ) -> Result<BlobMetadata, StashError> {
-        let mut metadata = self.load_metadata(id).await?;
+        let mut metadata = self.load_metadata(tenant, id).await?;
+
+        // Fail-closed: if tenant doesn't match, return NotFound to avoid leaking blob existence.
+        if metadata.tenant_id != tenant {
+            return Err(StashError::NotFound { id: id.into() });
+        }
 
         match metadata.status {
             BlobStatus::Active => {}
@@ -366,7 +390,7 @@ impl<S: Store> StashEngine<S> {
             ));
         }
 
-        self.check_policy(id, "REWRAP", actor).await?;
+        self.check_policy(tenant, id, "REWRAP", actor).await?;
 
         let cipher = self
             .capabilities
@@ -381,7 +405,8 @@ impl<S: Store> StashEngine<S> {
 
         self.save_metadata(&metadata).await?;
 
-        self.emit_audit("REWRAP", id, EventResult::Ok, actor).await;
+        self.emit_audit("REWRAP", tenant, id, EventResult::Ok, actor)
+            .await;
 
         Ok(metadata)
     }
@@ -399,11 +424,17 @@ impl<S: Store> StashEngine<S> {
     /// legal/forensic holds.
     pub async fn revoke_blob(
         &self,
+        tenant: &str,
         id: &str,
         soft: bool,
         actor: Option<&str>,
     ) -> Result<(), StashError> {
-        let mut metadata = self.load_metadata(id).await?;
+        let mut metadata = self.load_metadata(tenant, id).await?;
+
+        // Fail-closed: if tenant doesn't match, return NotFound to avoid leaking blob existence.
+        if metadata.tenant_id != tenant {
+            return Err(StashError::NotFound { id: id.into() });
+        }
 
         // Already terminal states.
         if metadata.status == BlobStatus::Shredded {
@@ -411,7 +442,7 @@ impl<S: Store> StashEngine<S> {
         }
 
         // Check ABAC policy.
-        self.check_policy(id, "REVOKE", actor).await?;
+        self.check_policy(tenant, id, "REVOKE", actor).await?;
 
         let now = now_ms();
 
@@ -423,7 +454,7 @@ impl<S: Store> StashEngine<S> {
         } else {
             // Hard revoke (crypto-shred):
             // 1. Load and cascade viewer copies.
-            let viewer_map = self.load_viewer_map(id).await.unwrap_or_default();
+            let viewer_map = self.load_viewer_map(tenant, id).await.unwrap_or_default();
 
             // Delete all viewer S3 objects.
             for viewer in &viewer_map.viewers {
@@ -453,7 +484,8 @@ impl<S: Store> StashEngine<S> {
             self.save_metadata(&metadata).await?;
 
             // 4. Clear the viewer map.
-            self.save_viewer_map(id, &ViewerMap::default()).await?;
+            self.save_viewer_map(tenant, id, &ViewerMap::default())
+                .await?;
 
             tracing::info!(
                 blob_id = id,
@@ -463,26 +495,33 @@ impl<S: Store> StashEngine<S> {
         }
 
         let op = if soft { "REVOKE_SOFT" } else { "REVOKE_HARD" };
-        self.emit_audit(op, id, EventResult::Ok, actor).await;
+        self.emit_audit(op, tenant, id, EventResult::Ok, actor)
+            .await;
 
         Ok(())
     }
 
     // ── Internal helpers ───────────────────────────────────────────────
 
-    /// Build the S3 object key for a blob.
-    fn s3_key(&self, id: &str) -> String {
+    /// Build the tenant-scoped Store key for metadata/viewer maps.
+    fn meta_key(tenant: &str, id: &str) -> Vec<u8> {
+        format!("{tenant}:{id}").into_bytes()
+    }
+
+    /// Build the S3 object key for a blob, scoped by tenant.
+    fn s3_key(&self, tenant: &str, id: &str) -> String {
         match &self.config.s3_key_prefix {
-            Some(prefix) => format!("{prefix}{id}"),
-            None => id.to_string(),
+            Some(prefix) => format!("{prefix}{tenant}/{id}"),
+            None => format!("{tenant}/{id}"),
         }
     }
 
     /// Load blob metadata from the Store.
-    async fn load_metadata(&self, id: &str) -> Result<BlobMetadata, StashError> {
+    async fn load_metadata(&self, tenant: &str, id: &str) -> Result<BlobMetadata, StashError> {
+        let key = Self::meta_key(tenant, id);
         let entry = self
             .store
-            .get(META_NS, id.as_bytes(), None)
+            .get(META_NS, &key, None)
             .await
             .map_err(|e| match e {
                 shroudb_store::StoreError::NotFound => StashError::NotFound { id: id.into() },
@@ -495,20 +534,22 @@ impl<S: Store> StashEngine<S> {
 
     /// Persist blob metadata to the Store.
     async fn save_metadata(&self, metadata: &BlobMetadata) -> Result<(), StashError> {
+        let key = Self::meta_key(&metadata.tenant_id, &metadata.id);
         let value = serde_json::to_vec(metadata)
             .map_err(|e| StashError::Internal(format!("serialize metadata: {e}")))?;
         self.store
-            .put(META_NS, metadata.id.as_bytes(), &value, None)
+            .put(META_NS, &key, &value, None)
             .await
             .map_err(|e| StashError::Store(format!("save metadata: {e}")))?;
         Ok(())
     }
 
     /// Load the viewer map for a blob.
-    async fn load_viewer_map(&self, id: &str) -> Result<ViewerMap, StashError> {
+    async fn load_viewer_map(&self, tenant: &str, id: &str) -> Result<ViewerMap, StashError> {
+        let key = Self::meta_key(tenant, id);
         let entry = self
             .store
-            .get(VIEWER_NS, id.as_bytes(), None)
+            .get(VIEWER_NS, &key, None)
             .await
             .map_err(|e| match e {
                 shroudb_store::StoreError::NotFound => StashError::NotFound { id: id.into() },
@@ -520,19 +561,67 @@ impl<S: Store> StashEngine<S> {
     }
 
     /// Persist the viewer map for a blob.
-    async fn save_viewer_map(&self, id: &str, map: &ViewerMap) -> Result<(), StashError> {
+    async fn save_viewer_map(
+        &self,
+        tenant: &str,
+        id: &str,
+        map: &ViewerMap,
+    ) -> Result<(), StashError> {
+        let key = Self::meta_key(tenant, id);
         let value = serde_json::to_vec(map)
             .map_err(|e| StashError::Internal(format!("serialize viewer map: {e}")))?;
         self.store
-            .put(VIEWER_NS, id.as_bytes(), &value, None)
+            .put(VIEWER_NS, &key, &value, None)
             .await
             .map_err(|e| StashError::Store(format!("save viewer map: {e}")))?;
         Ok(())
     }
 
+    // ── LIST ──────────────────────────────────────────────────────────
+
+    /// List blobs for a tenant.
+    ///
+    /// Scans the metadata namespace for keys with the `{tenant}:` prefix.
+    /// Returns inspect results for matching blobs (up to `limit`).
+    pub async fn list_blobs(
+        &self,
+        tenant: &str,
+        limit: usize,
+        actor: Option<&str>,
+    ) -> Result<Vec<InspectResult>, StashError> {
+        let prefix = format!("{tenant}:");
+        let page = self
+            .store
+            .list(META_NS, Some(prefix.as_bytes()), None, limit)
+            .await
+            .map_err(|e| StashError::Store(format!("list blobs: {e}")))?;
+
+        let mut results = Vec::with_capacity(page.keys.len());
+        for key in &page.keys {
+            let entry = self
+                .store
+                .get(META_NS, key, None)
+                .await
+                .map_err(|e| StashError::Store(format!("list: get metadata: {e}")))?;
+            let metadata: BlobMetadata = serde_json::from_slice(&entry.value)
+                .map_err(|e| StashError::Internal(format!("corrupt metadata: {e}")))?;
+            let viewer_map = self
+                .load_viewer_map(tenant, &metadata.id)
+                .await
+                .unwrap_or_default();
+            results.push(InspectResult::from((&metadata, viewer_map.len())));
+        }
+
+        self.emit_audit("LIST", tenant, "*", EventResult::Ok, actor)
+            .await;
+
+        Ok(results)
+    }
+
     /// Check ABAC policy via Sentry (if available).
     async fn check_policy(
         &self,
+        tenant: &str,
         resource_id: &str,
         action: &str,
         actor: Option<&str>,
@@ -543,6 +632,8 @@ impl<S: Store> StashEngine<S> {
         };
 
         let actor_id = actor.unwrap_or("anonymous");
+        let mut resource_attrs = std::collections::HashMap::new();
+        resource_attrs.insert("tenant".to_string(), tenant.to_string());
         let request = PolicyRequest {
             principal: PolicyPrincipal {
                 id: actor_id.to_string(),
@@ -552,7 +643,7 @@ impl<S: Store> StashEngine<S> {
             resource: PolicyResource {
                 id: resource_id.to_string(),
                 resource_type: "stash".to_string(),
-                attributes: std::collections::HashMap::new(),
+                attributes: resource_attrs,
             },
             action: action.to_string(),
         };
@@ -620,6 +711,7 @@ impl<S: Store> StashEngine<S> {
     async fn emit_audit(
         &self,
         operation: &str,
+        tenant: &str,
         resource: &str,
         result: EventResult,
         actor: Option<&str>,
@@ -633,7 +725,7 @@ impl<S: Store> StashEngine<S> {
             ChronicleEngine::Stash,
             operation.to_string(),
             "blob".to_string(),
-            resource.to_string(),
+            format!("{tenant}:{resource}"),
             result,
             actor.unwrap_or("anonymous").to_string(),
         );
@@ -753,6 +845,9 @@ mod tests {
         unsafe { &*ptr }
     }
 
+    /// Default tenant used in tests.
+    const TEST_TENANT: &str = "test-tenant";
+
     /// Helper to store a blob with default params.
     async fn store(
         engine: &StashEngine<shroudb_storage::EmbeddedStore>,
@@ -762,6 +857,7 @@ mod tests {
     ) -> Result<BlobMetadata, StashError> {
         engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id,
                 data,
                 content_type,
@@ -802,7 +898,10 @@ mod tests {
         assert!(!meta.client_encrypted);
         assert_eq!(meta.content_type.as_deref(), Some("text/plain"));
 
-        let result = engine.retrieve_blob("test-1", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "test-1", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, plaintext);
         assert!(result.wrapped_dek.is_none());
     }
@@ -815,6 +914,7 @@ mod tests {
 
         let meta = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-1",
                 data: &ciphertext,
                 content_type: Some("application/octet-stream"),
@@ -829,7 +929,10 @@ mod tests {
         assert!(meta.client_encrypted);
         assert_eq!(meta.wrapped_dek, wrapped_dek);
 
-        let result = engine.retrieve_blob("ce-1", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "ce-1", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, ciphertext);
         assert_eq!(result.wrapped_dek.as_deref(), Some(wrapped_dek.as_str()));
     }
@@ -839,6 +942,7 @@ mod tests {
         let engine = setup().await;
         let err = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-err",
                 data: b"data",
                 content_type: None,
@@ -868,7 +972,10 @@ mod tests {
             .await
             .unwrap();
 
-        let result = engine.inspect_blob("inspect-1", None).await.unwrap();
+        let result = engine
+            .inspect_blob(TEST_TENANT, "inspect-1", None)
+            .await
+            .unwrap();
         assert_eq!(result.id, "inspect-1");
         assert_eq!(result.status, BlobStatus::Active);
         assert_eq!(result.plaintext_size, 5);
@@ -879,7 +986,10 @@ mod tests {
     #[tokio::test]
     async fn inspect_not_found() {
         let engine = setup().await;
-        let err = engine.inspect_blob("nope", None).await.unwrap_err();
+        let err = engine
+            .inspect_blob(TEST_TENANT, "nope", None)
+            .await
+            .unwrap_err();
         assert!(err.is_not_found());
     }
 
@@ -888,12 +998,21 @@ mod tests {
         let engine = setup().await;
         store(&engine, "rev-soft", b"data", None).await.unwrap();
 
-        engine.revoke_blob("rev-soft", true, None).await.unwrap();
+        engine
+            .revoke_blob(TEST_TENANT, "rev-soft", true, None)
+            .await
+            .unwrap();
 
-        let info = engine.inspect_blob("rev-soft", None).await.unwrap();
+        let info = engine
+            .inspect_blob(TEST_TENANT, "rev-soft", None)
+            .await
+            .unwrap();
         assert_eq!(info.status, BlobStatus::Revoked);
 
-        let err = engine.retrieve_blob("rev-soft", None).await.unwrap_err();
+        let err = engine
+            .retrieve_blob(TEST_TENANT, "rev-soft", None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, StashError::Revoked { .. }));
     }
 
@@ -905,20 +1024,37 @@ mod tests {
             .unwrap();
 
         let obj_store = get_object_store(&engine);
-        assert!(obj_store.contains_key("rev-hard").await);
+        assert!(
+            obj_store
+                .contains_key(&format!("{TEST_TENANT}/rev-hard"))
+                .await
+        );
 
-        engine.revoke_blob("rev-hard", false, None).await.unwrap();
+        engine
+            .revoke_blob(TEST_TENANT, "rev-hard", false, None)
+            .await
+            .unwrap();
 
-        assert!(!obj_store.contains_key("rev-hard").await);
+        assert!(
+            !obj_store
+                .contains_key(&format!("{TEST_TENANT}/rev-hard"))
+                .await
+        );
 
-        let info = engine.inspect_blob("rev-hard", None).await.unwrap();
+        let info = engine
+            .inspect_blob(TEST_TENANT, "rev-hard", None)
+            .await
+            .unwrap();
         assert_eq!(info.status, BlobStatus::Shredded);
 
-        let err = engine.retrieve_blob("rev-hard", None).await.unwrap_err();
+        let err = engine
+            .retrieve_blob(TEST_TENANT, "rev-hard", None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, StashError::Shredded { .. }));
 
         let err = engine
-            .revoke_blob("rev-hard", false, None)
+            .revoke_blob(TEST_TENANT, "rev-hard", false, None)
             .await
             .unwrap_err();
         assert!(matches!(err, StashError::Shredded { .. }));
@@ -927,7 +1063,10 @@ mod tests {
     #[tokio::test]
     async fn revoke_not_found() {
         let engine = setup().await;
-        let err = engine.revoke_blob("nope", false, None).await.unwrap_err();
+        let err = engine
+            .revoke_blob(TEST_TENANT, "nope", false, None)
+            .await
+            .unwrap_err();
         assert!(err.is_not_found());
     }
 
@@ -953,7 +1092,11 @@ mod tests {
 
         store(&engine, "blob-1", b"data", None).await.unwrap();
 
-        assert!(obj_store.contains_key("my-prefix/blob-1").await);
+        assert!(
+            obj_store
+                .contains_key(&format!("my-prefix/{TEST_TENANT}/blob-1"))
+                .await
+        );
         assert!(!obj_store.contains_key("blob-1").await);
     }
 
@@ -977,7 +1120,10 @@ mod tests {
         assert_eq!(meta.plaintext_size, meta.encrypted_size);
 
         // Retrieve should return raw bytes.
-        let result = engine.retrieve_blob("raw-1", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "raw-1", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, b"unencrypted data");
         assert!(result.wrapped_dek.is_none());
     }
@@ -994,7 +1140,7 @@ mod tests {
         // We can't easily share the Store across engines in tests, so instead
         // verify via inspect that the blob has a wrapped_dek.
         let info = engine_with_cipher
-            .inspect_blob("enc-blob", None)
+            .inspect_blob(TEST_TENANT, "enc-blob", None)
             .await
             .unwrap();
         assert!(info.encrypted_size > info.plaintext_size);
@@ -1007,7 +1153,10 @@ mod tests {
 
         store(&engine, "large", &plaintext, None).await.unwrap();
 
-        let result = engine.retrieve_blob("large", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "large", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, plaintext);
     }
 
@@ -1021,6 +1170,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 let data = format!("blob-data-{i}");
                 eng.store_blob(StoreBlobParams {
+                    tenant: TEST_TENANT,
                     id: &format!("concurrent-{i}"),
                     data: data.as_bytes(),
                     content_type: Some("text/plain"),
@@ -1041,7 +1191,7 @@ mod tests {
         // Verify all blobs are retrievable with correct data.
         for i in 0..10 {
             let result = engine
-                .retrieve_blob(&format!("concurrent-{i}"), None)
+                .retrieve_blob(TEST_TENANT, &format!("concurrent-{i}"), None)
                 .await
                 .unwrap();
             let expected = format!("blob-data-{i}");
@@ -1079,14 +1229,20 @@ mod tests {
             .unwrap();
 
         // The encrypted data in S3 should start with the chunked version byte
-        let encrypted = obj_store.get("chunked-blob").await.unwrap();
+        let encrypted = obj_store
+            .get(&format!("{TEST_TENANT}/chunked-blob"))
+            .await
+            .unwrap();
         assert!(
             crate::crypto::is_chunked(&encrypted),
             "blob should use chunked encryption format"
         );
 
         // Retrieve should auto-detect chunked format and decrypt correctly
-        let result = engine.retrieve_blob("chunked-blob", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "chunked-blob", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, plaintext, "chunked decrypt roundtrip failed");
     }
 
@@ -1112,13 +1268,19 @@ mod tests {
         store(&engine, "small-blob", plaintext, None).await.unwrap();
 
         // Should NOT be chunked
-        let encrypted = obj_store.get("small-blob").await.unwrap();
+        let encrypted = obj_store
+            .get(&format!("{TEST_TENANT}/small-blob"))
+            .await
+            .unwrap();
         assert!(
             !crate::crypto::is_chunked(&encrypted),
             "small blob should use standard encryption"
         );
 
-        let result = engine.retrieve_blob("small-blob", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "small-blob", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, plaintext);
     }
 
@@ -1132,19 +1294,28 @@ mod tests {
         store(&engine, "rw-1", plaintext, None).await.unwrap();
 
         // Inspect before rewrap
-        let before = engine.inspect_blob("rw-1", None).await.unwrap();
+        let before = engine
+            .inspect_blob(TEST_TENANT, "rw-1", None)
+            .await
+            .unwrap();
         assert_eq!(before.key_version, 1);
 
         // Rewrap
-        let meta = engine.rewrap_blob("rw-1", None).await.unwrap();
+        let meta = engine.rewrap_blob(TEST_TENANT, "rw-1", None).await.unwrap();
         assert_eq!(meta.key_version, 2, "key_version should be updated");
 
         // Inspect after rewrap confirms version changed
-        let after = engine.inspect_blob("rw-1", None).await.unwrap();
+        let after = engine
+            .inspect_blob(TEST_TENANT, "rw-1", None)
+            .await
+            .unwrap();
         assert_eq!(after.key_version, 2);
 
         // Data is still retrievable with same plaintext
-        let result = engine.retrieve_blob("rw-1", None).await.unwrap();
+        let result = engine
+            .retrieve_blob(TEST_TENANT, "rw-1", None)
+            .await
+            .unwrap();
         assert_eq!(result.data, plaintext, "plaintext should be unchanged");
     }
 
@@ -1157,6 +1328,7 @@ mod tests {
         let wrapped_dek = valid_wrapped_dek();
         engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-rw",
                 data: &ciphertext,
                 content_type: None,
@@ -1169,14 +1341,14 @@ mod tests {
             .unwrap();
 
         // Rewrap should fail — client manages key material
-        let err = engine.rewrap_blob("ce-rw", None).await;
+        let err = engine.rewrap_blob(TEST_TENANT, "ce-rw", None).await;
         assert!(err.is_err(), "rewrap on client-encrypted should fail");
     }
 
     #[tokio::test]
     async fn rewrap_nonexistent_fails() {
         let engine = setup().await;
-        let err = engine.rewrap_blob("nope", None).await;
+        let err = engine.rewrap_blob(TEST_TENANT, "nope", None).await;
         assert!(err.is_err());
     }
 
@@ -1184,8 +1356,11 @@ mod tests {
     async fn rewrap_revoked_fails() {
         let engine = setup().await;
         store(&engine, "revoked-rw", b"data", None).await.unwrap();
-        engine.revoke_blob("revoked-rw", true, None).await.unwrap(); // soft revoke
-        let err = engine.rewrap_blob("revoked-rw", None).await;
+        engine
+            .revoke_blob(TEST_TENANT, "revoked-rw", true, None)
+            .await
+            .unwrap(); // soft revoke
+        let err = engine.rewrap_blob(TEST_TENANT, "revoked-rw", None).await;
         assert!(err.is_err(), "rewrap on revoked blob should fail");
     }
 
@@ -1198,6 +1373,7 @@ mod tests {
 
         let err = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-bad-b64",
                 data: &ciphertext,
                 content_type: None,
@@ -1225,6 +1401,7 @@ mod tests {
 
         let err = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-short-dek",
                 data: &ciphertext,
                 content_type: None,
@@ -1252,6 +1429,7 @@ mod tests {
 
         let err = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-short-ct",
                 data: &short_ct,
                 content_type: None,
@@ -1291,6 +1469,7 @@ mod tests {
         // Should succeed even with non-base64 DEK and tiny ciphertext
         let meta = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-novalidate",
                 data: b"tiny",
                 content_type: None,
@@ -1314,6 +1493,7 @@ mod tests {
 
         let meta = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-min-ct",
                 data: &ct,
                 content_type: None,
@@ -1341,6 +1521,7 @@ mod tests {
 
         let meta = engine
             .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
                 id: "ce-min-dek",
                 data: &ciphertext,
                 content_type: None,

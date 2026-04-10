@@ -12,6 +12,7 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "INSPECT",
     "REWRAP",
     "REVOKE",
+    "LIST",
     "HEALTH",
     "PING",
     "COMMAND LIST",
@@ -31,6 +32,7 @@ pub async fn dispatch<S: Store>(
         return StashResponse::error(e);
     }
 
+    let tenant = auth_context.map(|c| c.tenant.as_str()).unwrap_or("default");
     let actor = auth_context.map(|c| c.actor.as_str());
 
     match cmd {
@@ -47,6 +49,7 @@ pub async fn dispatch<S: Store>(
         } => {
             match engine
                 .store_blob(StoreBlobParams {
+                    tenant,
                     id: &id,
                     data: &data,
                     content_type: content_type.as_deref(),
@@ -72,7 +75,7 @@ pub async fn dispatch<S: Store>(
         }
 
         // ── RETRIEVE ──────────────────────────────────────────────────
-        StashCommand::Retrieve { id } => match engine.retrieve_blob(&id, actor).await {
+        StashCommand::Retrieve { id } => match engine.retrieve_blob(tenant, &id, actor).await {
             Ok(result) => {
                 let mut meta_json = serde_json::json!({
                     "status": "ok",
@@ -93,7 +96,7 @@ pub async fn dispatch<S: Store>(
         },
 
         // ── INSPECT ───────────────────────────────────────────────────
-        StashCommand::Inspect { id } => match engine.inspect_blob(&id, actor).await {
+        StashCommand::Inspect { id } => match engine.inspect_blob(tenant, &id, actor).await {
             Ok(info) => StashResponse::ok(serde_json::json!({
                 "status": "ok",
                 "id": info.id,
@@ -112,19 +115,21 @@ pub async fn dispatch<S: Store>(
         },
 
         // ── REVOKE ────────────────────────────────────────────────────
-        StashCommand::Revoke { id, soft } => match engine.revoke_blob(&id, soft, actor).await {
-            Ok(()) => {
-                let mode = if soft { "soft" } else { "hard" };
-                StashResponse::ok(serde_json::json!({
-                    "status": "ok",
-                    "id": id,
-                    "revoke_mode": mode,
-                }))
+        StashCommand::Revoke { id, soft } => {
+            match engine.revoke_blob(tenant, &id, soft, actor).await {
+                Ok(()) => {
+                    let mode = if soft { "soft" } else { "hard" };
+                    StashResponse::ok(serde_json::json!({
+                        "status": "ok",
+                        "id": id,
+                        "revoke_mode": mode,
+                    }))
+                }
+                Err(e) => StashResponse::error(e.to_string()),
             }
-            Err(e) => StashResponse::error(e.to_string()),
-        },
+        }
 
-        StashCommand::Rewrap { id } => match engine.rewrap_blob(&id, actor).await {
+        StashCommand::Rewrap { id } => match engine.rewrap_blob(tenant, &id, actor).await {
             Ok(meta) => StashResponse::ok(serde_json::json!({
                 "status": "ok",
                 "id": meta.id,
@@ -133,6 +138,20 @@ pub async fn dispatch<S: Store>(
             })),
             Err(e) => StashResponse::error(e.to_string()),
         },
+
+        // ── LIST ──────────────────────────────────────────────────────
+        StashCommand::List { limit } => {
+            let lim = limit.unwrap_or(100);
+            match engine.list_blobs(tenant, lim, actor).await {
+                Ok(blobs) => StashResponse::ok(serde_json::json!({
+                    "status": "ok",
+                    "tenant": tenant,
+                    "count": blobs.len(),
+                    "blobs": blobs,
+                })),
+                Err(e) => StashResponse::error(e.to_string()),
+            }
+        }
 
         // ── Operational ───────────────────────────────────────────────
         StashCommand::Health => StashResponse::ok(serde_json::json!({
@@ -221,18 +240,23 @@ mod tests {
             .unwrap()
     }
 
+    fn test_ctx() -> AuthContext {
+        AuthContext::platform("test-tenant", "test-actor")
+    }
+
     #[tokio::test]
     async fn full_store_retrieve_flow() {
         let engine = setup().await;
+        let ctx = test_ctx();
 
         let data_b64 = STANDARD.encode(b"hello stash protocol");
         let cmd =
             parse_command(&["STORE", "proto-1", &data_b64, "CONTENT_TYPE", "text/plain"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(resp.is_ok(), "store failed: {resp:?}");
 
         let cmd = parse_command(&["RETRIEVE", "proto-1"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         match resp {
             StashResponse::Blob { data, metadata } => {
                 assert_eq!(data, b"hello stash protocol");
@@ -245,15 +269,16 @@ mod tests {
     #[tokio::test]
     async fn store_inspect_revoke_flow() {
         let engine = setup().await;
+        let ctx = test_ctx();
 
         let data_b64 = STANDARD.encode(b"secret");
         let cmd = parse_command(&["STORE", "sir-1", &data_b64]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(resp.is_ok());
 
         // Inspect
         let cmd = parse_command(&["INSPECT", "sir-1"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(resp.is_ok());
         match &resp {
             StashResponse::Ok(v) => {
@@ -265,7 +290,7 @@ mod tests {
 
         // Soft revoke
         let cmd = parse_command(&["REVOKE", "sir-1", "SOFT"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(resp.is_ok());
         match &resp {
             StashResponse::Ok(v) => assert_eq!(v["revoke_mode"], "soft"),
@@ -274,20 +299,21 @@ mod tests {
 
         // Retrieve should fail
         let cmd = parse_command(&["RETRIEVE", "sir-1"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(!resp.is_ok());
     }
 
     #[tokio::test]
     async fn hard_revoke_flow() {
         let engine = setup().await;
+        let ctx = test_ctx();
 
         let data_b64 = STANDARD.encode(b"shred-me");
         let cmd = parse_command(&["STORE", "shred-1", &data_b64]).unwrap();
-        dispatch(&engine, cmd, None).await;
+        dispatch(&engine, cmd, Some(&ctx)).await;
 
         let cmd = parse_command(&["REVOKE", "shred-1"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(resp.is_ok());
         match &resp {
             StashResponse::Ok(v) => assert_eq!(v["revoke_mode"], "hard"),
@@ -296,7 +322,7 @@ mod tests {
 
         // Inspect shows shredded
         let cmd = parse_command(&["INSPECT", "shred-1"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         match &resp {
             StashResponse::Ok(v) => assert_eq!(v["blob_status"], "shredded"),
             _ => panic!("expected Ok"),
@@ -319,8 +345,9 @@ mod tests {
     #[tokio::test]
     async fn retrieve_not_found() {
         let engine = setup().await;
+        let ctx = test_ctx();
         let cmd = parse_command(&["RETRIEVE", "nope"]).unwrap();
-        let resp = dispatch(&engine, cmd, None).await;
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
         assert!(!resp.is_ok());
     }
 
@@ -360,5 +387,81 @@ mod tests {
             }
             _ => panic!("expected Ok"),
         }
+    }
+
+    #[tokio::test]
+    async fn list_blobs() {
+        let engine = setup().await;
+        let ctx = test_ctx();
+
+        // Store two blobs
+        let data_b64 = STANDARD.encode(b"blob-a-data");
+        let cmd = parse_command(&["STORE", "list-a", &data_b64]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "store list-a failed: {resp:?}");
+
+        let data_b64 = STANDARD.encode(b"blob-b-data");
+        let cmd = parse_command(&["STORE", "list-b", &data_b64]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "store list-b failed: {resp:?}");
+
+        // LIST should return both
+        let cmd = parse_command(&["LIST"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "list failed: {resp:?}");
+        match &resp {
+            StashResponse::Ok(v) => {
+                assert_eq!(v["tenant"], "test-tenant");
+                assert_eq!(v["count"], 2);
+                let blobs = v["blobs"].as_array().unwrap();
+                assert_eq!(blobs.len(), 2);
+            }
+            _ => panic!("expected Ok"),
+        }
+
+        // LIST with LIMIT 1 should return 1
+        let cmd = parse_command(&["LIST", "LIMIT", "1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok());
+        match &resp {
+            StashResponse::Ok(v) => {
+                assert_eq!(v["count"], 1);
+            }
+            _ => panic!("expected Ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tenant_isolation() {
+        let engine = setup().await;
+
+        let ctx_a = AuthContext::platform("tenant-a", "actor-a");
+        let ctx_b = AuthContext::platform("tenant-b", "actor-b");
+
+        // Store a blob as tenant-a
+        let data_b64 = STANDARD.encode(b"tenant-a-secret");
+        let cmd = parse_command(&["STORE", "isolated-1", &data_b64]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx_a)).await;
+        assert!(resp.is_ok(), "store failed: {resp:?}");
+
+        // tenant-a can retrieve it
+        let cmd = parse_command(&["RETRIEVE", "isolated-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx_a)).await;
+        assert!(resp.is_ok(), "tenant-a retrieve should succeed");
+
+        // tenant-b cannot retrieve it (NotFound, not access denied)
+        let cmd = parse_command(&["RETRIEVE", "isolated-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx_b)).await;
+        assert!(!resp.is_ok(), "tenant-b retrieve should fail");
+
+        // tenant-b cannot inspect it
+        let cmd = parse_command(&["INSPECT", "isolated-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx_b)).await;
+        assert!(!resp.is_ok(), "tenant-b inspect should fail");
+
+        // tenant-a can inspect it
+        let cmd = parse_command(&["INSPECT", "isolated-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx_a)).await;
+        assert!(resp.is_ok(), "tenant-a inspect should succeed");
     }
 }

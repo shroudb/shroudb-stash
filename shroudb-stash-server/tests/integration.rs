@@ -86,7 +86,7 @@ async fn test_store_and_retrieve_minio() {
     let head = s3
         .head_object()
         .bucket(server.s3_bucket.as_ref().unwrap())
-        .key("minio-blob-1")
+        .key("default/minio-blob-1")
         .send()
         .await
         .expect("S3 HEAD should find the object");
@@ -132,7 +132,7 @@ async fn test_hard_revoke_deletes_s3_object_minio() {
     let bucket = server.s3_bucket.as_ref().unwrap();
     s3.head_object()
         .bucket(bucket)
-        .key("revoke-s3")
+        .key("default/revoke-s3")
         .send()
         .await
         .expect("object should exist before revoke");
@@ -147,7 +147,7 @@ async fn test_hard_revoke_deletes_s3_object_minio() {
     let head_err = s3
         .head_object()
         .bucket(bucket)
-        .key("revoke-s3")
+        .key("default/revoke-s3")
         .send()
         .await;
     assert!(
@@ -867,7 +867,7 @@ async fn test_no_cipher_with_minio() {
     let obj = s3
         .get_object()
         .bucket(bucket)
-        .key("raw-minio-1")
+        .key("default/raw-minio-1")
         .send()
         .await
         .expect("S3 GET should find the raw object");

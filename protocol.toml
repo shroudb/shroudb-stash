@@ -123,6 +123,22 @@ status = "string"
 id = "string"
 revoke_mode = "string"
 
+[commands.list]
+description = "List blobs for the current tenant"
+syntax = "LIST [LIMIT <n>]"
+acl = "namespace:stash.*/READ"
+
+[commands.list.parameters.limit]
+type = "integer"
+required = false
+description = "Maximum number of blobs to return (default: 100)"
+
+[commands.list.response]
+status = "string"
+tenant = "string"
+count = "integer"
+blobs = "array"
+
 [commands.health]
 description = "Health check"
 syntax = "HEALTH"

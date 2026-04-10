@@ -27,6 +27,9 @@ impl std::fmt::Display for BlobStatus {
 pub struct BlobMetadata {
     /// Unique blob identifier.
     pub id: String,
+    /// Tenant that owns this blob. Empty for pre-tenant blobs (backward compat).
+    #[serde(default)]
+    pub tenant_id: String,
     /// S3 object key for the encrypted blob.
     pub s3_key: String,
     /// Base64-encoded CiphertextEnvelope wrapping the data encryption key.
@@ -91,6 +94,7 @@ impl ViewerMap {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InspectResult {
     pub id: String,
+    pub tenant_id: String,
     pub status: BlobStatus,
     pub content_type: Option<String>,
     pub plaintext_size: u64,
@@ -107,6 +111,7 @@ impl From<(&BlobMetadata, usize)> for InspectResult {
     fn from((meta, viewer_count): (&BlobMetadata, usize)) -> Self {
         Self {
             id: meta.id.clone(),
+            tenant_id: meta.tenant_id.clone(),
             status: meta.status,
             content_type: meta.content_type.clone(),
             plaintext_size: meta.plaintext_size,
@@ -149,6 +154,7 @@ mod tests {
     fn blob_metadata_serde_roundtrip() {
         let meta = BlobMetadata {
             id: "test-blob".into(),
+            tenant_id: String::new(),
             s3_key: "stash/test-blob".into(),
             wrapped_dek: "base64dek".into(),
             keyring: "stash-blobs".into(),
@@ -193,6 +199,7 @@ mod tests {
     fn inspect_result_from_metadata() {
         let meta = BlobMetadata {
             id: "test".into(),
+            tenant_id: String::new(),
             s3_key: "s3/test".into(),
             wrapped_dek: "dek".into(),
             keyring: "kr".into(),

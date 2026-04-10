@@ -39,6 +39,11 @@ pub enum StashCommand {
         soft: bool,
     },
 
+    /// List blobs for the current tenant.
+    List {
+        limit: Option<usize>,
+    },
+
     // Operational
     Health,
     Ping,
@@ -72,6 +77,12 @@ impl StashCommand {
                     tenant_override: None,
                 }
             }
+
+            StashCommand::List { .. } => AclRequirement::Namespace {
+                ns: "stash.*".to_string(),
+                scope: Scope::Read,
+                tenant_override: None,
+            },
         }
     }
 }
@@ -97,6 +108,7 @@ pub fn parse_command(args: &[&str]) -> Result<StashCommand, String> {
             })
         }
         "REVOKE" => parse_revoke(args),
+        "LIST" => parse_list(args),
         "HEALTH" => Ok(StashCommand::Health),
         "PING" => Ok(StashCommand::Ping),
         "COMMAND" => Ok(StashCommand::CommandList),
@@ -176,6 +188,16 @@ fn parse_revoke(args: &[&str]) -> Result<StashCommand, String> {
         id: args[1].to_string(),
         soft,
     })
+}
+
+fn parse_list(args: &[&str]) -> Result<StashCommand, String> {
+    let limit = find_option(args, "LIMIT")
+        .map(|v| {
+            v.parse::<usize>()
+                .map_err(|e| format!("invalid LIMIT value: {e}"))
+        })
+        .transpose()?;
+    Ok(StashCommand::List { limit })
 }
 
 /// Find an optional keyword argument: `KEY value` in the args list.
