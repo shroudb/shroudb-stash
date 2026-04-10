@@ -41,6 +41,14 @@ pub enum StashError {
     #[error("crypto error: {0}")]
     Crypto(String),
 
+    /// Duplicate viewer fingerprint.
+    #[error("viewer already fingerprinted: {viewer_id} on blob {blob_id}")]
+    DuplicateViewer { blob_id: String, viewer_id: String },
+
+    /// Cannot fingerprint a client-encrypted blob (client manages encryption).
+    #[error("cannot fingerprint client-encrypted blob: {id}")]
+    ClientEncrypted { id: String },
+
     /// Invalid argument.
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
@@ -71,6 +79,8 @@ impl StashError {
             Self::Revoked { .. } => "REVOKED",
             Self::Shredded { .. } => "SHREDDED",
             Self::CipherUnavailable => "CIPHER_UNAVAILABLE",
+            Self::DuplicateViewer { .. } => "DUPLICATE_VIEWER",
+            Self::ClientEncrypted { .. } => "CLIENT_ENCRYPTED",
             Self::ObjectStore(_) => "OBJECT_STORE",
             Self::AbacDenied { .. } => "DENIED",
             Self::Store(_) => "STORE",

@@ -107,6 +107,28 @@ pub struct InspectResult {
     pub updated_at: u64,
 }
 
+/// Result of a TRACE command — viewer map for a blob.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceResult {
+    pub id: String,
+    pub status: BlobStatus,
+    pub viewer_count: usize,
+    pub viewers: Vec<ViewerRecord>,
+    pub created_at: u64,
+}
+
+impl From<(&BlobMetadata, Vec<ViewerRecord>)> for TraceResult {
+    fn from((meta, viewers): (&BlobMetadata, Vec<ViewerRecord>)) -> Self {
+        Self {
+            id: meta.id.clone(),
+            status: meta.status,
+            viewer_count: viewers.len(),
+            viewers,
+            created_at: meta.created_at,
+        }
+    }
+}
+
 impl From<(&BlobMetadata, usize)> for InspectResult {
     fn from((meta, viewer_count): (&BlobMetadata, usize)) -> Self {
         Self {

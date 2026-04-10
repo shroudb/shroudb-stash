@@ -123,6 +123,49 @@ status = "string"
 id = "string"
 revoke_mode = "string"
 
+[commands.fingerprint]
+description = "Create a viewer-specific encrypted copy of a blob for leak tracing"
+syntax = "FINGERPRINT <id> <viewer_id> [PARAMS <json>]"
+acl = "namespace:stash.<id>/WRITE"
+
+[commands.fingerprint.parameters.id]
+type = "string"
+required = true
+description = "Blob identifier"
+
+[commands.fingerprint.parameters.viewer_id]
+type = "string"
+required = true
+description = "Viewer identifier for the fingerprinted copy"
+
+[commands.fingerprint.parameters.params]
+type = "string"
+required = false
+description = "JSON string of fingerprint parameters passed to the processor"
+
+[commands.fingerprint.response]
+status = "string"
+viewer_id = "string"
+s3_key = "string"
+created_at = "integer"
+
+[commands.trace]
+description = "Return the viewer map (who has copies) for a blob"
+syntax = "TRACE <id>"
+acl = "namespace:stash.<id>/READ"
+
+[commands.trace.parameters.id]
+type = "string"
+required = true
+description = "Blob identifier"
+
+[commands.trace.response]
+status = "string"
+id = "string"
+blob_status = "string"
+viewer_count = "integer"
+viewers = "array"
+
 [commands.list]
 description = "List blobs for the current tenant"
 syntax = "LIST [LIMIT <n>]"
@@ -177,6 +220,14 @@ http_equiv = 410
 [error_codes.CIPHER_UNAVAILABLE]
 description = "Cipher engine not available for envelope encryption"
 http_equiv = 503
+
+[error_codes.DUPLICATE_VIEWER]
+description = "Viewer already has a fingerprinted copy of this blob"
+http_equiv = 409
+
+[error_codes.CLIENT_ENCRYPTED]
+description = "Cannot fingerprint a client-encrypted blob (client manages encryption)"
+http_equiv = 400
 
 [error_codes.DENIED]
 description = "ABAC policy denied the operation"

@@ -12,6 +12,8 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "INSPECT",
     "REWRAP",
     "REVOKE",
+    "FINGERPRINT",
+    "TRACE",
     "LIST",
     "HEALTH",
     "PING",
@@ -136,6 +138,62 @@ pub async fn dispatch<S: Store>(
                 "key_version": meta.key_version,
                 "updated_at": meta.updated_at,
             })),
+            Err(e) => StashResponse::error(e.to_string()),
+        },
+
+        // ── FINGERPRINT ──────────────────────────────────────────────
+        StashCommand::Fingerprint {
+            id,
+            viewer_id,
+            params,
+        } => {
+            let parsed_params = match params {
+                Some(ref json_str) => match serde_json::from_str(json_str) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        return StashResponse::error(format!("invalid PARAMS json: {e}"));
+                    }
+                },
+                None => None,
+            };
+
+            match engine
+                .fingerprint_blob(tenant, &id, &viewer_id, parsed_params, actor)
+                .await
+            {
+                Ok(record) => StashResponse::ok(serde_json::json!({
+                    "status": "ok",
+                    "viewer_id": record.viewer_id,
+                    "s3_key": record.s3_key,
+                    "created_at": record.created_at,
+                })),
+                Err(e) => StashResponse::error(e.to_string()),
+            }
+        }
+
+        // ── TRACE ────────────────────────────────────────────────────
+        StashCommand::Trace { id } => match engine.trace_blob(tenant, &id, actor).await {
+            Ok(result) => {
+                let viewers: Vec<serde_json::Value> = result
+                    .viewers
+                    .iter()
+                    .map(|v| {
+                        serde_json::json!({
+                            "viewer_id": v.viewer_id,
+                            "s3_key": v.s3_key,
+                            "created_at": v.created_at,
+                        })
+                    })
+                    .collect();
+
+                StashResponse::ok(serde_json::json!({
+                    "status": "ok",
+                    "id": result.id,
+                    "blob_status": result.status,
+                    "viewer_count": result.viewer_count,
+                    "viewers": viewers,
+                }))
+            }
             Err(e) => StashResponse::error(e.to_string()),
         },
 
@@ -463,5 +521,139 @@ mod tests {
         let cmd = parse_command(&["INSPECT", "isolated-1"]).unwrap();
         let resp = dispatch(&engine, cmd, Some(&ctx_a)).await;
         assert!(resp.is_ok(), "tenant-a inspect should succeed");
+    }
+
+    #[tokio::test]
+    async fn fingerprint_creates_viewer_copy() {
+        let engine = setup().await;
+        let ctx = test_ctx();
+
+        // Store a blob
+        let data_b64 = STANDARD.encode(b"fingerprint-me");
+        let cmd = parse_command(&["STORE", "fp-1", &data_b64]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "store failed: {resp:?}");
+
+        // Fingerprint for viewer-1
+        let cmd = parse_command(&["FINGERPRINT", "fp-1", "viewer-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "fingerprint failed: {resp:?}");
+        match &resp {
+            StashResponse::Ok(v) => {
+                assert_eq!(v["status"], "ok");
+                assert_eq!(v["viewer_id"], "viewer-1");
+                assert!(v["s3_key"].as_str().unwrap().contains("viewers/viewer-1"));
+                assert!(v["created_at"].as_u64().is_some());
+            }
+            _ => panic!("expected Ok"),
+        }
+
+        // Inspect should show viewer_count=1
+        let cmd = parse_command(&["INSPECT", "fp-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        match &resp {
+            StashResponse::Ok(v) => {
+                assert_eq!(v["viewer_count"], 1);
+            }
+            _ => panic!("expected Ok from inspect"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fingerprint_duplicate_viewer_rejected() {
+        let engine = setup().await;
+        let ctx = test_ctx();
+
+        let data_b64 = STANDARD.encode(b"dup-viewer-test");
+        let cmd = parse_command(&["STORE", "fp-dup", &data_b64]).unwrap();
+        dispatch(&engine, cmd, Some(&ctx)).await;
+
+        // First fingerprint succeeds
+        let cmd = parse_command(&["FINGERPRINT", "fp-dup", "viewer-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok());
+
+        // Second fingerprint for same viewer fails
+        let cmd = parse_command(&["FINGERPRINT", "fp-dup", "viewer-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(!resp.is_ok(), "duplicate fingerprint should fail");
+        match resp {
+            StashResponse::Error(msg) => {
+                assert!(
+                    msg.contains("already fingerprinted"),
+                    "error should mention duplicate: {msg}"
+                );
+            }
+            _ => panic!("expected Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn trace_returns_viewer_map() {
+        let engine = setup().await;
+        let ctx = test_ctx();
+
+        let data_b64 = STANDARD.encode(b"trace-test");
+        let cmd = parse_command(&["STORE", "tr-1", &data_b64]).unwrap();
+        dispatch(&engine, cmd, Some(&ctx)).await;
+
+        // Fingerprint two viewers
+        let cmd = parse_command(&["FINGERPRINT", "tr-1", "viewer-a"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "fingerprint viewer-a failed: {resp:?}");
+
+        let cmd = parse_command(&["FINGERPRINT", "tr-1", "viewer-b"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "fingerprint viewer-b failed: {resp:?}");
+
+        // TRACE should return both viewers
+        let cmd = parse_command(&["TRACE", "tr-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(resp.is_ok(), "trace failed: {resp:?}");
+        match &resp {
+            StashResponse::Ok(v) => {
+                assert_eq!(v["status"], "ok");
+                assert_eq!(v["id"], "tr-1");
+                assert_eq!(v["blob_status"], "active");
+                assert_eq!(v["viewer_count"], 2);
+                let viewers = v["viewers"].as_array().unwrap();
+                assert_eq!(viewers.len(), 2);
+                let viewer_ids: Vec<&str> = viewers
+                    .iter()
+                    .map(|v| v["viewer_id"].as_str().unwrap())
+                    .collect();
+                assert!(viewer_ids.contains(&"viewer-a"));
+                assert!(viewer_ids.contains(&"viewer-b"));
+            }
+            _ => panic!("expected Ok"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fingerprint_revoked_blob_rejected() {
+        let engine = setup().await;
+        let ctx = test_ctx();
+
+        let data_b64 = STANDARD.encode(b"revoke-fp-test");
+        let cmd = parse_command(&["STORE", "fp-rev", &data_b64]).unwrap();
+        dispatch(&engine, cmd, Some(&ctx)).await;
+
+        // Soft revoke
+        let cmd = parse_command(&["REVOKE", "fp-rev", "SOFT"]).unwrap();
+        dispatch(&engine, cmd, Some(&ctx)).await;
+
+        // Fingerprint should fail
+        let cmd = parse_command(&["FINGERPRINT", "fp-rev", "viewer-1"]).unwrap();
+        let resp = dispatch(&engine, cmd, Some(&ctx)).await;
+        assert!(!resp.is_ok(), "fingerprint on revoked blob should fail");
+        match resp {
+            StashResponse::Error(msg) => {
+                assert!(
+                    msg.contains("revoked"),
+                    "error should mention revoked: {msg}"
+                );
+            }
+            _ => panic!("expected Error"),
+        }
     }
 }

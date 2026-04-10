@@ -4,11 +4,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use shroudb_acl::{PolicyEffect, PolicyPrincipal, PolicyRequest, PolicyResource};
 use shroudb_chronicle_core::event::{Engine as ChronicleEngine, Event, EventResult};
 use shroudb_store::Store;
+use zeroize::Zeroize;
 
 use crate::capabilities::Capabilities;
 use crate::object_store::ObjectStore;
 use shroudb_stash_core::error::StashError;
-use shroudb_stash_core::metadata::{BlobMetadata, BlobStatus, InspectResult, ViewerMap};
+use shroudb_stash_core::metadata::{
+    BlobMetadata, BlobStatus, InspectResult, TraceResult, ViewerMap, ViewerRecord,
+};
 
 /// Configuration for the Stash engine.
 #[derive(Debug, Clone)]
@@ -499,6 +502,179 @@ impl<S: Store> StashEngine<S> {
             .await;
 
         Ok(())
+    }
+
+    // ── FINGERPRINT ────────────────────────────────────────────────────
+
+    /// Create a viewer-specific encrypted copy of a blob.
+    ///
+    /// Decrypts the master blob, generates a new DEK for the viewer,
+    /// re-encrypts with viewer-specific AAD (`{id}:{viewer_id}`), and
+    /// uploads to S3 under `{s3_key}/viewers/{viewer_id}`.
+    ///
+    /// Each viewer gets their own DEK, enabling per-viewer revocation
+    /// and leak tracing.
+    pub async fn fingerprint_blob(
+        &self,
+        tenant: &str,
+        id: &str,
+        viewer_id: &str,
+        params: Option<serde_json::Value>,
+        actor: Option<&str>,
+    ) -> Result<ViewerRecord, StashError> {
+        let metadata = self.load_metadata(tenant, id).await?;
+
+        // Fail-closed: if tenant doesn't match, return NotFound.
+        if metadata.tenant_id != tenant {
+            return Err(StashError::NotFound { id: id.into() });
+        }
+
+        // Only active blobs can be fingerprinted.
+        match metadata.status {
+            BlobStatus::Active => {}
+            BlobStatus::Revoked => return Err(StashError::Revoked { id: id.into() }),
+            BlobStatus::Shredded => return Err(StashError::Shredded { id: id.into() }),
+        }
+
+        // Client-encrypted blobs cannot be fingerprinted — client manages encryption.
+        if metadata.client_encrypted {
+            return Err(StashError::ClientEncrypted { id: id.into() });
+        }
+
+        // Check ABAC policy.
+        self.check_policy(tenant, id, "FINGERPRINT", actor).await?;
+
+        // Cipher is required for fingerprinting (need to unwrap master DEK + generate viewer DEK).
+        let cipher = self
+            .capabilities
+            .cipher
+            .as_ref()
+            .ok_or(StashError::CipherUnavailable)?;
+
+        // Check for duplicate viewer.
+        let mut viewer_map = self.load_viewer_map(tenant, id).await.unwrap_or_default();
+        if viewer_map.find(viewer_id).is_some() {
+            return Err(StashError::DuplicateViewer {
+                blob_id: id.into(),
+                viewer_id: viewer_id.into(),
+            });
+        }
+
+        // Download encrypted blob from S3.
+        let encrypted_data = self
+            .object_store
+            .get(&metadata.s3_key)
+            .await
+            .map_err(|e| StashError::ObjectStore(e.to_string()))?;
+
+        // Unwrap master DEK via Cipher.
+        let master_key = cipher.unwrap_data_key(&metadata.wrapped_dek).await?;
+
+        // Decrypt blob locally.
+        let plaintext = if crate::crypto::is_chunked(&encrypted_data) {
+            crate::crypto::decrypt_blob_chunked(
+                master_key.as_bytes(),
+                &encrypted_data,
+                id.as_bytes(),
+            )?
+        } else {
+            let (data, _used_legacy) = crate::crypto::decrypt_blob_compat(
+                master_key.as_bytes(),
+                &encrypted_data,
+                id.as_bytes(),
+            )?;
+            data
+        };
+        // master_key dropped here → SensitiveBytes auto-zeroizes
+        drop(master_key);
+
+        // Generate new viewer DEK via Cipher.
+        let viewer_dek_pair = cipher.generate_data_key(Some(256)).await?;
+        let viewer_key = viewer_dek_pair.plaintext_key;
+
+        // Encrypt plaintext with viewer DEK using viewer-specific AAD.
+        let viewer_aad = format!("{id}:{viewer_id}");
+        let use_streaming = self.config.streaming_threshold_bytes > 0
+            && plaintext.len() > self.config.streaming_threshold_bytes;
+        let viewer_ciphertext = if use_streaming {
+            crate::crypto::encrypt_blob_chunked(
+                viewer_key.as_bytes(),
+                &plaintext,
+                viewer_aad.as_bytes(),
+            )?
+        } else {
+            crate::crypto::encrypt_blob(viewer_key.as_bytes(), &plaintext, viewer_aad.as_bytes())?
+        };
+        // viewer_key dropped here → SensitiveBytes auto-zeroizes
+        // Zeroize plaintext immediately.
+        drop(viewer_key);
+        let mut plaintext = plaintext;
+        plaintext.zeroize();
+
+        // Upload viewer copy to S3.
+        let viewer_s3_key = format!("{}/viewers/{}", self.s3_key(tenant, id), viewer_id);
+        self.object_store
+            .put(
+                &viewer_s3_key,
+                &viewer_ciphertext,
+                Some("application/octet-stream"),
+            )
+            .await
+            .map_err(|e| StashError::ObjectStore(e.to_string()))?;
+
+        // Create viewer record.
+        let record = ViewerRecord {
+            viewer_id: viewer_id.to_string(),
+            s3_key: viewer_s3_key,
+            wrapped_dek: viewer_dek_pair.wrapped_key,
+            fingerprint_params: params.unwrap_or(serde_json::json!({})),
+            created_at: now_ms(),
+        };
+
+        // Append to viewer map and save.
+        viewer_map.viewers.push(record.clone());
+        self.save_viewer_map(tenant, id, &viewer_map).await?;
+
+        // Audit.
+        self.emit_audit("FINGERPRINT", tenant, id, EventResult::Ok, actor)
+            .await;
+
+        tracing::info!(
+            blob_id = id,
+            viewer_id,
+            viewer_count = viewer_map.len(),
+            "viewer fingerprint created"
+        );
+
+        Ok(record)
+    }
+
+    // ── TRACE ─────────────────────────────────────────────────────────
+
+    /// Return the viewer map (who has copies) for a blob.
+    pub async fn trace_blob(
+        &self,
+        tenant: &str,
+        id: &str,
+        actor: Option<&str>,
+    ) -> Result<TraceResult, StashError> {
+        let metadata = self.load_metadata(tenant, id).await?;
+
+        // Fail-closed: if tenant doesn't match, return NotFound.
+        if metadata.tenant_id != tenant {
+            return Err(StashError::NotFound { id: id.into() });
+        }
+
+        // Check ABAC policy.
+        self.check_policy(tenant, id, "TRACE", actor).await?;
+
+        let viewer_map = self.load_viewer_map(tenant, id).await.unwrap_or_default();
+
+        // Audit.
+        self.emit_audit("TRACE", tenant, id, EventResult::Ok, actor)
+            .await;
+
+        Ok(TraceResult::from((&metadata, viewer_map.viewers)))
     }
 
     // ── Internal helpers ───────────────────────────────────────────────

@@ -39,6 +39,18 @@ pub enum StashCommand {
         soft: bool,
     },
 
+    /// Create a viewer-specific encrypted copy of a blob.
+    Fingerprint {
+        id: String,
+        viewer_id: String,
+        params: Option<String>,
+    },
+
+    /// Return the viewer map (who has copies) for a blob.
+    Trace {
+        id: String,
+    },
+
     /// List blobs for the current tenant.
     List {
         limit: Option<usize>,
@@ -63,20 +75,21 @@ impl StashCommand {
             // Write operations
             StashCommand::Store { id, .. }
             | StashCommand::Rewrap { id }
-            | StashCommand::Revoke { id, .. } => AclRequirement::Namespace {
+            | StashCommand::Revoke { id, .. }
+            | StashCommand::Fingerprint { id, .. } => AclRequirement::Namespace {
                 ns: format!("stash.{id}"),
                 scope: Scope::Write,
                 tenant_override: None,
             },
 
             // Read operations
-            StashCommand::Retrieve { id } | StashCommand::Inspect { id } => {
-                AclRequirement::Namespace {
-                    ns: format!("stash.{id}"),
-                    scope: Scope::Read,
-                    tenant_override: None,
-                }
-            }
+            StashCommand::Retrieve { id }
+            | StashCommand::Inspect { id }
+            | StashCommand::Trace { id } => AclRequirement::Namespace {
+                ns: format!("stash.{id}"),
+                scope: Scope::Read,
+                tenant_override: None,
+            },
 
             StashCommand::List { .. } => AclRequirement::Namespace {
                 ns: "stash.*".to_string(),
@@ -108,6 +121,8 @@ pub fn parse_command(args: &[&str]) -> Result<StashCommand, String> {
             })
         }
         "REVOKE" => parse_revoke(args),
+        "FINGERPRINT" => parse_fingerprint(args),
+        "TRACE" => parse_trace(args),
         "LIST" => parse_list(args),
         "HEALTH" => Ok(StashCommand::Health),
         "PING" => Ok(StashCommand::Ping),
@@ -187,6 +202,30 @@ fn parse_revoke(args: &[&str]) -> Result<StashCommand, String> {
     Ok(StashCommand::Revoke {
         id: args[1].to_string(),
         soft,
+    })
+}
+
+fn parse_fingerprint(args: &[&str]) -> Result<StashCommand, String> {
+    // FINGERPRINT <id> <viewer_id> [PARAMS <json>]
+    if args.len() < 3 {
+        return Err("FINGERPRINT <id> <viewer_id> [PARAMS <json>]".into());
+    }
+    let id = args[1].to_string();
+    let viewer_id = args[2].to_string();
+    let params = find_option(args, "PARAMS").map(String::from);
+    Ok(StashCommand::Fingerprint {
+        id,
+        viewer_id,
+        params,
+    })
+}
+
+fn parse_trace(args: &[&str]) -> Result<StashCommand, String> {
+    if args.len() < 2 {
+        return Err("TRACE <id>".into());
+    }
+    Ok(StashCommand::Trace {
+        id: args[1].to_string(),
     })
 }
 
@@ -361,6 +400,50 @@ mod tests {
         assert!(parse_command(&["INSPECT"]).is_err());
         assert!(parse_command(&["REVOKE"]).is_err());
         assert!(parse_command(&["AUTH"]).is_err());
+        assert!(parse_command(&["FINGERPRINT"]).is_err());
+        assert!(parse_command(&["FINGERPRINT", "id-only"]).is_err());
+        assert!(parse_command(&["TRACE"]).is_err());
+    }
+
+    #[test]
+    fn parse_fingerprint_minimal() {
+        let cmd = parse_command(&["FINGERPRINT", "blob-1", "viewer-1"]).unwrap();
+        match cmd {
+            StashCommand::Fingerprint {
+                id,
+                viewer_id,
+                params,
+            } => {
+                assert_eq!(id, "blob-1");
+                assert_eq!(viewer_id, "viewer-1");
+                assert!(params.is_none());
+            }
+            _ => panic!("expected Fingerprint command"),
+        }
+    }
+
+    #[test]
+    fn parse_fingerprint_with_params() {
+        let cmd = parse_command(&[
+            "FINGERPRINT",
+            "blob-1",
+            "viewer-1",
+            "PARAMS",
+            r#"{"mode":"invisible"}"#,
+        ])
+        .unwrap();
+        match cmd {
+            StashCommand::Fingerprint { params, .. } => {
+                assert_eq!(params.as_deref(), Some(r#"{"mode":"invisible"}"#));
+            }
+            _ => panic!("expected Fingerprint command"),
+        }
+    }
+
+    #[test]
+    fn parse_trace() {
+        let cmd = parse_command(&["TRACE", "blob-1"]).unwrap();
+        assert!(matches!(cmd, StashCommand::Trace { id } if id == "blob-1"));
     }
 
     #[test]
@@ -404,6 +487,28 @@ mod tests {
                 ..
             }
         ));
+
+        let cmd = StashCommand::Fingerprint {
+            id: "test".into(),
+            viewer_id: "v1".into(),
+            params: None,
+        };
+        assert!(matches!(
+            cmd.acl_requirement(),
+            AclRequirement::Namespace {
+                scope: Scope::Write,
+                ..
+            }
+        ));
+
+        let cmd = StashCommand::Trace { id: "test".into() };
+        assert!(matches!(
+            cmd.acl_requirement(),
+            AclRequirement::Namespace {
+                scope: Scope::Read,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -415,5 +520,7 @@ mod tests {
         assert!(parse_command(&["Revoke", "id"]).is_ok());
         assert!(parse_command(&["health"]).is_ok());
         assert!(parse_command(&["ping"]).is_ok());
+        assert!(parse_command(&["fingerprint", "id", "viewer"]).is_ok());
+        assert!(parse_command(&["trace", "id"]).is_ok());
     }
 }
