@@ -64,21 +64,30 @@ pub struct StashClient {
 }
 
 impl StashClient {
-    /// Connect to a Stash server.
+    /// Connect directly to a standalone Stash server.
     pub async fn connect(addr: &str) -> Result<Self, ClientError> {
         let conn = Connection::connect(addr).await?;
         Ok(Self { conn })
     }
 
+    /// Connect to a Stash engine through a Moat gateway.
+    ///
+    /// Commands are automatically prefixed with `STASH` for Moat routing.
+    /// Meta-commands (AUTH, HEALTH, PING) are sent without prefix.
+    pub async fn connect_moat(addr: &str) -> Result<Self, ClientError> {
+        let conn = Connection::connect_moat(addr).await?;
+        Ok(Self { conn })
+    }
+
     /// Authenticate this connection.
     pub async fn auth(&mut self, token: &str) -> Result<(), ClientError> {
-        let resp = self.command(&["AUTH", token]).await?;
+        let resp = self.meta_command(&["AUTH", token]).await?;
         check_status(&resp)
     }
 
     /// Health check.
     pub async fn health(&mut self) -> Result<(), ClientError> {
-        let resp = self.command(&["HEALTH"]).await?;
+        let resp = self.meta_command(&["HEALTH"]).await?;
         check_status(&resp)
     }
 
@@ -226,6 +235,10 @@ impl StashClient {
 
     async fn command(&mut self, args: &[&str]) -> Result<serde_json::Value, ClientError> {
         self.conn.send_command(args).await
+    }
+
+    async fn meta_command(&mut self, args: &[&str]) -> Result<serde_json::Value, ClientError> {
+        self.conn.send_meta_command(args).await
     }
 }
 

@@ -8,29 +8,56 @@ use crate::error::ClientError;
 pub struct Connection {
     reader: tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>,
     writer: tokio::io::BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+    command_prefix: Option<String>,
 }
 
 impl Connection {
-    /// Connect to a Stash server.
+    /// Connect directly to a standalone Stash server.
     pub async fn connect(addr: &str) -> Result<Self, ClientError> {
         let stream = tokio::net::TcpStream::connect(addr).await?;
         let (r, w) = stream.into_split();
         Ok(Self {
             reader: tokio::io::BufReader::new(r),
             writer: tokio::io::BufWriter::new(w),
+            command_prefix: None,
         })
     }
 
-    /// Send a command and read the response as a JSON value.
-    ///
-    /// Handles simple strings, bulk strings, errors, and arrays.
+    /// Connect to a Stash engine through a Moat gateway.
+    pub async fn connect_moat(addr: &str) -> Result<Self, ClientError> {
+        let stream = tokio::net::TcpStream::connect(addr).await?;
+        let (r, w) = stream.into_split();
+        Ok(Self {
+            reader: tokio::io::BufReader::new(r),
+            writer: tokio::io::BufWriter::new(w),
+            command_prefix: Some("STASH".to_string()),
+        })
+    }
+
+    /// Send an engine command (prefixed in Moat mode).
     pub async fn send_command(&mut self, args: &[&str]) -> Result<serde_json::Value, ClientError> {
+        if let Some(prefix) = self.command_prefix.clone() {
+            let mut prefixed = Vec::with_capacity(args.len() + 1);
+            prefixed.push(prefix.as_str());
+            prefixed.extend_from_slice(args);
+            self.write_command(&prefixed).await?;
+        } else {
+            self.write_command(args).await?;
+        }
+        self.read_value().await
+    }
+
+    /// Send a meta-command (AUTH, HEALTH, PING) without engine prefix.
+    pub async fn send_meta_command(
+        &mut self,
+        args: &[&str],
+    ) -> Result<serde_json::Value, ClientError> {
         self.write_command(args).await?;
         self.read_value().await
     }
 
     /// Send a command and return the raw RESP3 response.
-    /// Alias for `send_command` -- both handle all RESP3 types.
+    /// Alias for `send_command` — both handle all RESP3 types.
     pub async fn send_command_raw(
         &mut self,
         args: &[&str],
