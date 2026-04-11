@@ -24,6 +24,7 @@ allow = [
     "BSL-1.0",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "LicenseRef-Proprietary",
 ]
 confidence-threshold = 0.8
 
