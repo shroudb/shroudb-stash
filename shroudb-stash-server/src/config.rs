@@ -119,3 +119,45 @@ pub fn load_config(path: Option<&str>) -> anyhow::Result<StashServerConfig> {
         None => Ok(StashServerConfig::default()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_defaults_to_embedded_mode() {
+        let cfg = StashServerConfig::default();
+        assert_eq!(cfg.store.mode, "embedded");
+        assert!(cfg.store.uri.is_none());
+    }
+
+    #[test]
+    fn config_parses_remote_mode_with_uri() {
+        let toml = r#"
+[store]
+mode = "remote"
+uri = "shroudb://token@127.0.0.1:6399"
+"#;
+        let cfg: StashServerConfig = toml::from_str(toml).expect("parse failed");
+        assert_eq!(cfg.store.mode, "remote");
+        assert_eq!(
+            cfg.store.uri.as_deref(),
+            Some("shroudb://token@127.0.0.1:6399")
+        );
+    }
+
+    #[test]
+    fn config_parses_remote_mode_tls_uri() {
+        let toml = r#"
+[store]
+mode = "remote"
+uri = "shroudb+tls://token@store.example.com:6399"
+"#;
+        let cfg: StashServerConfig = toml::from_str(toml).expect("parse failed");
+        assert_eq!(cfg.store.mode, "remote");
+        assert_eq!(
+            cfg.store.uri.as_deref(),
+            Some("shroudb+tls://token@store.example.com:6399")
+        );
+    }
+}

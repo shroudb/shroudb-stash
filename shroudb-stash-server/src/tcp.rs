@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -9,13 +10,14 @@ use shroudb_stash_engine::engine::StashEngine;
 use shroudb_stash_protocol::commands::{StashCommand, parse_command};
 use shroudb_stash_protocol::dispatch::dispatch;
 use shroudb_stash_protocol::response::StashResponse;
+use shroudb_store::Store;
 
-pub struct StashProtocol;
+pub struct StashProtocol<S>(PhantomData<S>);
 
-impl ServerProtocol for StashProtocol {
+impl<S: Store + 'static> ServerProtocol for StashProtocol<S> {
     type Command = StashCommand;
     type Response = StashResponse;
-    type Engine = StashEngine<shroudb_storage::EmbeddedStore>;
+    type Engine = StashEngine<S>;
 
     fn engine_name(&self) -> &str {
         "stash"
@@ -72,9 +74,9 @@ impl ServerProtocol for StashProtocol {
     }
 }
 
-pub async fn run_tcp(
+pub async fn run_tcp<S: Store + 'static>(
     listener: tokio::net::TcpListener,
-    engine: Arc<StashEngine<shroudb_storage::EmbeddedStore>>,
+    engine: Arc<StashEngine<S>>,
     token_validator: Option<Arc<dyn TokenValidator>>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
@@ -82,7 +84,7 @@ pub async fn run_tcp(
     shroudb_server_tcp::run_tcp_tls(
         listener,
         engine,
-        Arc::new(StashProtocol),
+        Arc::new(StashProtocol::<S>(PhantomData)),
         token_validator,
         shutdown_rx,
         tls_acceptor,
