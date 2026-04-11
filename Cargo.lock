@@ -2443,9 +2443,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.7.0"
+version = "1.7.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "d9779cac51cfc9cb74b782b410dd7098b7d0ffa5ae3cbaccc3adddaacea33c5b"
+checksum = "1abb730994e722ae1c18f1d0f40548f54ed6f6396c9af97daba6294a9ebce3a5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2455,9 +2455,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-client"
-version = "1.0.6"
+version = "1.0.11"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "0d5822539849814c4763f362c70f6737f3fadaaf3a8b85d16932fd42e555b8c3"
+checksum = "a549c3c304eb5fdceb62f2e66262938372197e96c7a6e4e3ff2ac0c743e6e94d"
 dependencies = [
  "rustls 0.23.37",
  "rustls-native-certs",
@@ -2506,9 +2506,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-server-bootstrap"
-version = "0.1.1"
+version = "0.1.2"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "4dfdd289b1f465a5a5672eee79234465fa8155ff049c8603e4b89fe6e550cbb8"
+checksum = "dc4677c811054fee58b7c2e5c82ac317236590d8d303eebc3a6da31f03ed4ded"
 dependencies = [
  "anyhow",
  "shroudb-crypto",
@@ -2643,9 +2643,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-storage"
-version = "0.2.17"
+version = "0.3.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "37eac376af24371a09cfb5948ab25ff60d5018290b07278818001aa39c54a728"
+checksum = "f673c156d61a10d26e1499c21b110a8acfa93ddb2ec9b1ca54fe671d493aa803"
 dependencies = [
  "crc32fast",
  "dashmap",
