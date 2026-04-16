@@ -50,8 +50,12 @@ ring = "0.17"
 zeroize = { version = "1", features = ["derive"] }
 
 # S3
+# Opt out of aws-sdk-s3's default `rustls` feature — it pulls in legacy rustls 0.21
+# (transitively rustls-webpki 0.101.7) which is vulnerable to RUSTSEC-2026-0098/0099
+# with no upstream patch on the 0.101.x line. `default-https-client` uses the
+# modern rustls-aws-lc (rustls 0.23 + rustls-webpki 0.103.x).
 aws-config = "1"
-aws-sdk-s3 = "1"
+aws-sdk-s3 = { version = "1", default-features = false, features = ["sigv4a", "http-1x", "default-https-client", "rt-tokio"] }
 aws-smithy-types = "1"
 
 # CLI
