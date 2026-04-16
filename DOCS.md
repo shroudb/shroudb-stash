@@ -31,7 +31,9 @@ STORE <id> <data_b64> [KEYRING <name>] [CONTENT_TYPE <mime>] [CLIENT_ENCRYPTED <
   "key_version": 1,
   "plaintext_size": 12345,
   "encrypted_size": 12373,
-  "client_encrypted": false
+  "client_encrypted": false,
+  "content_hash": "…",
+  "deduplicated": false
 }
 ```
 
@@ -137,6 +139,130 @@ REVOKE <id> [SOFT]
 | `SHREDDED` | Blob already crypto-shredded |
 | `DENIED` | ABAC policy denied the operation |
 
+### REWRAP
+
+Re-wrap a blob's DEK under the current Cipher key version. The blob ciphertext is not re-encrypted — only the key wrapping changes.
+
+```
+REWRAP <id>
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "id": "my-doc",
+  "key_version": 2,
+  "updated_at": 1700000000000
+}
+```
+
+**Errors:**
+
+| Code | Condition |
+|------|-----------|
+| `NOTFOUND` | Blob does not exist |
+| `SHREDDED` | Blob has been crypto-shredded |
+| `CIPHER_UNAVAILABLE` | Cipher engine not available |
+| `DENIED` | ABAC policy denied the operation |
+
+### FINGERPRINT
+
+Create a viewer-specific encrypted copy of a blob for leak tracing.
+
+```
+FINGERPRINT <id> <viewer_id> [PARAMS <json>]
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `id` | yes | Blob identifier |
+| `viewer_id` | yes | Viewer identifier for the fingerprinted copy |
+| `PARAMS` | no | JSON string of fingerprint parameters passed to the processor |
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "viewer_id": "viewer-1",
+  "s3_key": "stash/my-doc/viewers/viewer-1",
+  "created_at": 1700000000000
+}
+```
+
+**Errors:**
+
+| Code | Condition |
+|------|-----------|
+| `NOTFOUND` | Blob does not exist |
+| `REVOKED` | Blob has been soft-revoked |
+| `SHREDDED` | Blob has been crypto-shredded |
+| `DUPLICATE_VIEWER` | Viewer already has a fingerprinted copy |
+| `CLIENT_ENCRYPTED` | Cannot fingerprint a client-encrypted blob |
+| `CIPHER_UNAVAILABLE` | Cipher engine not available |
+| `DENIED` | ABAC policy denied the operation |
+
+### TRACE
+
+Return the viewer map (who has fingerprinted copies) for a blob.
+
+```
+TRACE <id>
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "id": "my-doc",
+  "blob_status": "active",
+  "viewer_count": 2,
+  "viewers": [
+    { "viewer_id": "viewer-a", "s3_key": "…", "created_at": 1700000000000 },
+    { "viewer_id": "viewer-b", "s3_key": "…", "created_at": 1700000000000 }
+  ]
+}
+```
+
+**Errors:**
+
+| Code | Condition |
+|------|-----------|
+| `NOTFOUND` | Blob does not exist |
+| `DENIED` | ABAC policy denied the operation |
+
+### LIST
+
+List blobs for the current tenant.
+
+```
+LIST [LIMIT <n>]
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `LIMIT` | no | Maximum number of blobs to return (default: 100) |
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "tenant": "my-tenant",
+  "count": 2,
+  "blobs": [ … ]
+}
+```
+
+**Errors:**
+
+| Code | Condition |
+|------|-----------|
+| `DENIED` | ABAC policy denied the operation |
+
 ### HEALTH
 
 ```
@@ -155,7 +281,14 @@ PING
 
 ```
 COMMAND
-→ { "count": 8, "commands": ["AUTH", "STORE", "RETRIEVE", "INSPECT", "REVOKE", "HEALTH", "PING", "COMMAND LIST"] }
+→ {
+    "count": 12,
+    "commands": [
+      "AUTH", "STORE", "RETRIEVE", "INSPECT", "REWRAP",
+      "REVOKE", "FINGERPRINT", "TRACE", "LIST",
+      "HEALTH", "PING", "COMMAND LIST"
+    ]
+  }
 ```
 
 ## ACL Requirements
@@ -166,7 +299,11 @@ COMMAND
 | STORE | Namespace `stash.<id>` | Write |
 | RETRIEVE | Namespace `stash.<id>` | Read |
 | INSPECT | Namespace `stash.<id>` | Read |
+| REWRAP | Namespace `stash.<id>` | Write |
 | REVOKE | Namespace `stash.<id>` | Write |
+| FINGERPRINT | Namespace `stash.<id>` | Write |
+| TRACE | Namespace `stash.<id>` | Read |
+| LIST | Namespace `stash.*` | Read |
 
 ## Encryption Details
 

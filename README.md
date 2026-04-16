@@ -61,6 +61,38 @@ REVOKE <id> [SOFT]
 - **Hard (default):** Crypto-shred — destroy wrapped DEK, delete all S3 objects (master + viewer copies), tombstone metadata.
 - **Soft (`SOFT` flag):** Mark as revoked. Sentry blocks future RETRIEVE. Blobs and DEKs preserved.
 
+### Re-wrap a blob's DEK
+
+```
+REWRAP <id>
+```
+
+Re-wrap the blob's DEK under the current Cipher key version. The blob ciphertext is not re-encrypted — only the key wrapping changes.
+
+### Fingerprint a blob for a viewer
+
+```
+FINGERPRINT <id> <viewer_id> [PARAMS <json>]
+```
+
+Create a viewer-specific encrypted copy for leak tracing. `PARAMS` is a JSON string forwarded to the fingerprint processor.
+
+### Trace viewer copies
+
+```
+TRACE <id>
+```
+
+Return the viewer map (viewer IDs and S3 keys of fingerprinted copies) for a blob.
+
+### List blobs
+
+```
+LIST [LIMIT <n>]
+```
+
+List blobs for the current tenant. Default limit is 100.
+
 ### Operational
 
 ```
