@@ -11,6 +11,17 @@ error_envelope = "simple_error"
 
 # ── Commands ──────────────────────────────────────────────────────────
 
+[commands.auth]
+description = "Authenticate this connection with a token"
+syntax = "AUTH <token>"
+acl = "none"
+note = "Handled at the connection layer before dispatch."
+
+[commands.auth.parameters.token]
+type = "string"
+required = true
+description = "Authentication token"
+
 [commands.store]
 description = "Store an encrypted blob"
 syntax = "STORE <id> <data_b64> [KEYRING <name>] [CONTENT_TYPE <mime>] [CLIENT_ENCRYPTED <wrapped_dek>]"
@@ -246,3 +257,11 @@ http_equiv = 500
 [error_codes.INVALID_ARGUMENT]
 description = "Invalid argument"
 http_equiv = 400
+
+[error_codes.STORE]
+description = "ShrouDB Store (metadata) operation failed"
+http_equiv = 500
+
+[error_codes.INTERNAL]
+description = "Internal engine error"
+http_equiv = 500
