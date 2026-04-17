@@ -210,6 +210,18 @@ description = "List supported commands"
 syntax = "COMMAND"
 acl = "none"
 
+[commands.hello]
+description = "Engine identity handshake — returns engine name, version, wire protocol, supported commands, and capability tags. Pre-auth; clients issue this on connect to verify they are talking to the expected engine and version."
+syntax = "HELLO"
+acl = "none"
+
+[commands.hello.response]
+engine = "string"
+version = "string"
+protocol = "string"
+commands = "array"
+capabilities = "array"
+
 # ── Error codes ───────────────────────────────────────────────────────
 
 [error_codes]

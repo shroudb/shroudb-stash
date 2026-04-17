@@ -60,6 +60,11 @@ pub enum StashCommand {
     Health,
     Ping,
     CommandList,
+    /// Engine identity handshake. Pre-auth; returns engine name, version,
+    /// wire protocol, supported commands, and capability tags so a client
+    /// can detect SDK/engine version mismatches before issuing any real
+    /// command.
+    Hello,
 }
 
 impl StashCommand {
@@ -70,7 +75,8 @@ impl StashCommand {
             StashCommand::Auth { .. }
             | StashCommand::Health
             | StashCommand::Ping
-            | StashCommand::CommandList => AclRequirement::None,
+            | StashCommand::CommandList
+            | StashCommand::Hello => AclRequirement::None,
 
             // Write operations
             StashCommand::Store { id, .. }
@@ -127,6 +133,7 @@ pub fn parse_command(args: &[&str]) -> Result<StashCommand, String> {
         "HEALTH" => Ok(StashCommand::Health),
         "PING" => Ok(StashCommand::Ping),
         "COMMAND" => Ok(StashCommand::CommandList),
+        "HELLO" => Ok(StashCommand::Hello),
         _ => Err(format!("unknown command: {}", args[0])),
     }
 }
@@ -379,6 +386,12 @@ mod tests {
     fn parse_command_list() {
         let cmd = parse_command(&["COMMAND"]).unwrap();
         assert!(matches!(cmd, StashCommand::CommandList));
+    }
+
+    #[test]
+    fn parse_hello() {
+        let cmd = parse_command(&["HELLO"]).unwrap();
+        assert!(matches!(cmd, StashCommand::Hello));
     }
 
     #[test]

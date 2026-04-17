@@ -1,4 +1,5 @@
 use shroudb_acl::AuthContext;
+use shroudb_protocol_wire::WIRE_PROTOCOL;
 use shroudb_stash_engine::engine::{StashEngine, StoreBlobParams, StoreResult};
 use shroudb_store::Store;
 
@@ -18,6 +19,7 @@ const SUPPORTED_COMMANDS: &[&str] = &[
     "HEALTH",
     "PING",
     "COMMAND LIST",
+    "HELLO",
 ];
 
 /// Dispatch a parsed command to the StashEngine and produce a response.
@@ -226,6 +228,14 @@ pub async fn dispatch<S: Store>(
         StashCommand::CommandList => StashResponse::ok(serde_json::json!({
             "count": SUPPORTED_COMMANDS.len(),
             "commands": SUPPORTED_COMMANDS,
+        })),
+
+        StashCommand::Hello => StashResponse::ok(serde_json::json!({
+            "engine": "stash",
+            "version": env!("CARGO_PKG_VERSION"),
+            "protocol": WIRE_PROTOCOL,
+            "commands": SUPPORTED_COMMANDS,
+            "capabilities": Vec::<&str>::new(),
         })),
     }
 }
