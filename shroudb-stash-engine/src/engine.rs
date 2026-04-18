@@ -253,15 +253,16 @@ impl<S: Store> StashEngine<S> {
 
                 (ciphertext, wrapped, version, pt_size, ct_size)
             } else {
-                // No Cipher available — store raw (unencrypted passthrough).
-                // Stash still tracks metadata and enforces access control,
-                // but data is uploaded to S3 without envelope encryption.
-                tracing::warn!(
+                // Fail-closed: without Cipher there is no envelope encryption
+                // path. Uploading plaintext to S3 would violate "no plaintext
+                // at rest". Refuse the operation so the operator either wires
+                // Cipher or uses client-encrypted passthrough.
+                tracing::error!(
                     blob_id = id,
-                    "cipher unavailable — storing blob without encryption"
+                    justification = ?self.capabilities.cipher.justification(),
+                    "STORE refused: cipher capability is not enabled"
                 );
-                let size = data.len() as u64;
-                (data.to_vec(), String::new(), 0, size, size)
+                return Err(StashError::CipherUnavailable);
             };
 
         // Upload encrypted blob to S3.
@@ -1465,31 +1466,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_without_cipher_stores_raw() {
+    async fn store_without_cipher_fails_closed() {
         let store_kv = shroudb_storage::test_util::create_test_store("stash-no-cipher").await;
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let caps = Capabilities::for_tests(); // No cipher
-        let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
+        let engine = StashEngine::new(store_kv, obj_store.clone(), caps, StashConfig::default())
             .await
             .unwrap();
 
-        // Should succeed — stores raw (unencrypted) to S3.
-        let meta = store(&engine, "raw-1", b"unencrypted data", Some("text/plain"))
+        // Server-encrypted STORE with no cipher must fail-closed — uploading
+        // plaintext to S3 would violate "no plaintext at rest".
+        let err = store(&engine, "raw-1", b"unencrypted data", Some("text/plain"))
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            matches!(err, StashError::CipherUnavailable),
+            "expected CipherUnavailable, got {err:?}"
+        );
 
-        assert_eq!(meta.id, "raw-1");
-        assert!(meta.wrapped_dek.is_empty());
-        // Raw mode: plaintext_size == encrypted_size (no crypto overhead).
-        assert_eq!(meta.plaintext_size, meta.encrypted_size);
+        // The S3 object must not exist — no plaintext landed.
+        assert!(
+            !obj_store
+                .contains_key(&format!("{TEST_TENANT}/raw-1"))
+                .await,
+            "no object should have been uploaded when STORE fails closed"
+        );
 
-        // Retrieve should return raw bytes.
-        let result = engine
-            .retrieve_blob(TEST_TENANT, "raw-1", None)
+        // Client-encrypted passthrough with a valid wrapped DEK and
+        // ciphertext still works — the client owns the encryption.
+        let ciphertext = valid_ciphertext(64);
+        let wrapped_dek = valid_wrapped_dek();
+        let meta = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "ce-ok",
+                data: &ciphertext,
+                content_type: None,
+                keyring: None,
+                client_encrypted: true,
+                wrapped_dek: Some(&wrapped_dek),
+                actor: None,
+            })
             .await
-            .unwrap();
-        assert_eq!(result.data, b"unencrypted data");
-        assert!(result.wrapped_dek.is_none());
+            .unwrap()
+            .metadata;
+        assert!(meta.client_encrypted);
     }
 
     #[tokio::test]

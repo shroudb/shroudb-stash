@@ -21,7 +21,7 @@ Rules:
 
 ### Open
 
-- [ ] **DEBT-1 (CRITICAL)** — STORE without cipher must fail-closed, not upload plaintext. Test: `debt_1_store_without_cipher_must_fail_closed` @ `shroudb-stash-engine/src/engine.rs`.
+- [x] **DEBT-1 (CRITICAL)** — STORE without cipher must fail-closed, not upload plaintext. Test: `debt_1_store_without_cipher_must_fail_closed` @ `shroudb-stash-engine/src/engine.rs`.
 - [ ] **DEBT-2** — RETRIEVE without Sentry must fail-closed, not permit. Test: `debt_2_retrieve_without_sentry_must_fail_closed` @ same file.
 - [ ] **DEBT-3** — audit failure must propagate to caller (currently logged and ignored). Test: `debt_3_audit_failure_must_propagate_to_caller` @ same file.
 - [ ] **DEBT-4** — hard-revoke must propagate S3 delete failure (currently marks Shredded but ciphertext survives). Test: `debt_4_hard_revoke_must_propagate_s3_delete_failure` @ same file.
