@@ -296,9 +296,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sts"
-version = "1.101.0"
+version = "1.102.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab41ad64e4051ecabeea802d6a17845a91e83287e1dd249e6963ea1ba78c428a"
+checksum = "0fc35b7a14cabdad13795fbbbd26d5ddec0882c01492ceedf2af575aad5f37dd"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -2036,9 +2036,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha",
@@ -2119,6 +2119,25 @@ dependencies = [
  "libc",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
 ]
 
 [[package]]
@@ -2426,15 +2445,61 @@ dependencies = [
 ]
 
 [[package]]
-name = "shroudb-chronicle-core"
-version = "1.7.3"
+name = "shroudb-audit"
+version = "0.1.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "9d2e18ff26eeef596ec2adb12395d61bf837bb0bbe8f48d12d911735fa617a53"
+checksum = "0262953423c69b8fc02baa96d929ddda87e87717f583282fd8c5165b2512f33f"
 dependencies = [
  "serde",
  "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "shroudb-chronicle-client"
+version = "1.11.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "62ae718ba295f6dc371a00da210b85e5624bc77dcc4608df118538c98298d442"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shroudb-chronicle-core",
+ "shroudb-client-common",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "shroudb-chronicle-core"
+version = "1.11.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "ff2e25843c917798885bab4251c16f9fbd09fdee607d81c67030063355bb8f86"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shroudb-audit",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "shroudb-chronicle-engine"
+version = "1.11.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "f21a0516b21062cce0bf16ceee127ba320252d42661cbed93fa6b17a6e825bc6"
+dependencies = [
+ "dashmap",
+ "hex",
+ "lru",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "shroudb-acl",
+ "shroudb-chronicle-core",
+ "shroudb-crypto",
+ "shroudb-store",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2452,6 +2517,17 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "shroudb-client-common"
+version = "0.2.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "9c4e6a263d9e57723137a0b67856433a4b2ee64a7a2b49d0925441284eff56fa"
+dependencies = [
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -2479,6 +2555,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "shroudb-engine-bootstrap"
+version = "0.1.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "cb5bd9e0634969707bd9230d3457b7133c91a628d53aef2b602bb88939f0f98a"
+dependencies = [
+ "anyhow",
+ "serde",
+ "shroudb-acl",
+ "shroudb-audit",
+ "shroudb-chronicle-client",
+ "shroudb-chronicle-core",
+ "shroudb-chronicle-engine",
+ "shroudb-sentry-client",
+ "shroudb-sentry-engine",
+ "shroudb-server-bootstrap",
+ "shroudb-storage",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "shroudb-protocol-wire"
 version = "0.2.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
@@ -2489,10 +2587,57 @@ dependencies = [
 ]
 
 [[package]]
-name = "shroudb-server-bootstrap"
-version = "0.1.3"
+name = "shroudb-sentry-client"
+version = "1.5.1"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "b9e931c1e1b461382bae423de9bd207d2009dd094a77e8a3d496e45b1f2a2a06"
+checksum = "1b75129bed8ea8734a173532e93fcbd9283b5f4d67391cc09cb505d87c982dd8"
+dependencies = [
+ "serde_json",
+ "shroudb-acl",
+ "shroudb-client-common",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "shroudb-sentry-core"
+version = "1.5.1"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "8d6200578afda764c8b7a89470a9da1cd5adb8aacaed0093e7d9e9af1630eb91"
+dependencies = [
+ "serde",
+ "shroudb-acl",
+ "shroudb-crypto",
+ "thiserror",
+]
+
+[[package]]
+name = "shroudb-sentry-engine"
+version = "1.5.1"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "1686f006193cd2fb9895085fda62dc05910399d4b52795f9f1c3b4ef5f96f69c"
+dependencies = [
+ "base64",
+ "dashmap",
+ "hex",
+ "serde",
+ "serde_json",
+ "shroudb-acl",
+ "shroudb-chronicle-core",
+ "shroudb-crypto",
+ "shroudb-sentry-core",
+ "shroudb-store",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
+name = "shroudb-server-bootstrap"
+version = "0.2.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "ff0cf64b7f0d01c2b995f420c8c4489985681627209b9cf9fc561d0de40aaab4"
 dependencies = [
  "anyhow",
  "shroudb-crypto",
@@ -2522,7 +2667,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -2534,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "serde",
@@ -2545,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2554,7 +2699,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2564,8 +2709,10 @@ dependencies = [
  "serde",
  "serde_json",
  "shroudb-acl",
+ "shroudb-audit",
  "shroudb-chronicle-core",
  "shroudb-crypto",
+ "shroudb-server-bootstrap",
  "shroudb-stash-core",
  "shroudb-storage",
  "shroudb-store",
@@ -2578,7 +2725,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "ring",
@@ -2587,6 +2734,7 @@ dependencies = [
  "shroudb-acl",
  "shroudb-crypto",
  "shroudb-protocol-wire",
+ "shroudb-server-bootstrap",
  "shroudb-stash-core",
  "shroudb-stash-engine",
  "shroudb-storage",
@@ -2597,7 +2745,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2610,6 +2758,7 @@ dependencies = [
  "shroudb-acl",
  "shroudb-client",
  "shroudb-crypto",
+ "shroudb-engine-bootstrap",
  "shroudb-protocol-wire",
  "shroudb-server-bootstrap",
  "shroudb-server-tcp",
@@ -3183,11 +3332,11 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.2+wasi-0.2.9"
+version = "1.0.3+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
+checksum = "20064672db26d7cdc89c7798c48a0fdfac8213434a1186e5ef29fd560ae223d6"
 dependencies = [
- "wit-bindgen",
+ "wit-bindgen 0.57.1",
 ]
 
 [[package]]
@@ -3196,7 +3345,7 @@ version = "0.4.0+wasi-0.3.0-rc-2026-01-06"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5428f8bf88ea5ddc08faddef2ac4a67e390b88186c703ce6dbd955e1c145aca5"
 dependencies = [
- "wit-bindgen",
+ "wit-bindgen 0.51.0",
 ]
 
 [[package]]
@@ -3380,6 +3529,12 @@ checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 dependencies = [
  "wit-bindgen-rust-macro",
 ]
+
+[[package]]
+name = "wit-bindgen"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wit-bindgen-core"

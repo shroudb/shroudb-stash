@@ -987,9 +987,9 @@ impl<S: Store> StashEngine<S> {
         action: &str,
         actor: Option<&str>,
     ) -> Result<(), StashError> {
-        let sentry = match &self.capabilities.sentry {
+        let sentry = match self.capabilities.sentry.as_ref() {
             Some(s) => s,
-            None => return Ok(()), // No Sentry = open mode.
+            None => return Ok(()), // Sentry disabled = no ABAC gating.
         };
 
         let actor_id = actor.unwrap_or("anonymous");
@@ -1077,7 +1077,7 @@ impl<S: Store> StashEngine<S> {
         result: EventResult,
         actor: Option<&str>,
     ) {
-        let chronicle = match &self.capabilities.chronicle {
+        let chronicle = match self.capabilities.chronicle.as_ref() {
             Some(c) => c,
             None => return,
         };
@@ -1126,6 +1126,7 @@ mod tests {
     use crate::capabilities::{DataKeyPair, StashCipherOps};
     use crate::object_store::InMemoryObjectStore;
     use shroudb_crypto::SensitiveBytes;
+    use shroudb_server_bootstrap::Capability;
 
     // ── Test doubles ──────────────────────────────────────────────────
 
@@ -1188,9 +1189,9 @@ mod tests {
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
-            cipher: Some(Box::new(mock_cipher)),
-            sentry: None,
-            chronicle: None,
+            cipher: Capability::Enabled(Box::new(mock_cipher)),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
         };
         StashEngine::new(store, obj_store, caps, StashConfig::default())
             .await
@@ -1439,9 +1440,9 @@ mod tests {
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
-            cipher: Some(Box::new(mock_cipher)),
-            sentry: None,
-            chronicle: None,
+            cipher: Capability::Enabled(Box::new(mock_cipher)),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
             default_keyring: "stash-blobs".into(),
@@ -1467,7 +1468,7 @@ mod tests {
     async fn store_without_cipher_stores_raw() {
         let store_kv = shroudb_storage::test_util::create_test_store("stash-no-cipher").await;
         let obj_store = Arc::new(InMemoryObjectStore::new());
-        let caps = Capabilities::default(); // No cipher
+        let caps = Capabilities::for_tests(); // No cipher
         let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
             .await
             .unwrap();
@@ -1573,9 +1574,9 @@ mod tests {
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
-            cipher: Some(Box::new(mock_cipher)),
-            sentry: None,
-            chronicle: None,
+            cipher: Capability::Enabled(Box::new(mock_cipher)),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
             streaming_threshold_bytes: 100, // very low: 100 bytes
@@ -1615,9 +1616,9 @@ mod tests {
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
-            cipher: Some(Box::new(mock_cipher)),
-            sentry: None,
-            chronicle: None,
+            cipher: Capability::Enabled(Box::new(mock_cipher)),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
             streaming_threshold_bytes: 1000, // threshold above our blob size
@@ -1817,9 +1818,9 @@ mod tests {
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
-            cipher: Some(Box::new(mock_cipher)),
-            sentry: None,
-            chronicle: None,
+            cipher: Capability::Enabled(Box::new(mock_cipher)),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
             validate_client_encrypted: false,
@@ -2154,5 +2155,421 @@ mod tests {
             .unwrap();
         assert!(!r2.deduplicated);
         assert!(r2.metadata.content_hash.is_none());
+    }
+
+    // ── AUDIT 2026-04-17: failing debt tests (hard ratchet, no #[ignore]) ──
+    //
+    // Stash violates CLAUDE.md's "fail closed, not open" and "no plaintext
+    // at rest" invariants in several places. These tests encode the
+    // correct behaviour. They MUST stay failing until the findings are
+    // fixed.
+
+    /// Recording double for ChronicleOps.
+    #[derive(Default)]
+    struct RecordingChronicle {
+        events: std::sync::Mutex<Vec<shroudb_chronicle_core::event::Event>>,
+    }
+    impl RecordingChronicle {
+        fn events(&self) -> Vec<shroudb_chronicle_core::event::Event> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+    impl shroudb_chronicle_core::ops::ChronicleOps for RecordingChronicle {
+        fn record(
+            &self,
+            event: shroudb_chronicle_core::event::Event,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>>
+        {
+            self.events.lock().unwrap().push(event);
+            Box::pin(async { Ok(()) })
+        }
+        fn record_batch(
+            &self,
+            events: Vec<shroudb_chronicle_core::event::Event>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>>
+        {
+            self.events.lock().unwrap().extend(events);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// Chronicle double that ALWAYS fails — used to prove the engine
+    /// silently swallows audit failures.
+    struct BrokenChronicle;
+    impl shroudb_chronicle_core::ops::ChronicleOps for BrokenChronicle {
+        fn record(
+            &self,
+            _event: shroudb_chronicle_core::event::Event,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>>
+        {
+            Box::pin(async { Err("simulated audit sink down".into()) })
+        }
+        fn record_batch(
+            &self,
+            _events: Vec<shroudb_chronicle_core::event::Event>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>>
+        {
+            Box::pin(async { Err("simulated audit sink down".into()) })
+        }
+    }
+
+    /// ObjectStore double whose `delete` always fails — used to prove
+    /// hard-revoke cannot silently leave the S3 object intact.
+    struct DeleteFailingObjectStore(Arc<InMemoryObjectStore>);
+    impl crate::object_store::ObjectStore for DeleteFailingObjectStore {
+        fn put(
+            &self,
+            key: &str,
+            data: &[u8],
+            content_type: Option<&str>,
+        ) -> crate::object_store::BoxFut<'_, ()> {
+            self.0.put(key, data, content_type)
+        }
+        fn get(&self, key: &str) -> crate::object_store::BoxFut<'_, Vec<u8>> {
+            self.0.get(key)
+        }
+        fn delete(&self, _key: &str) -> crate::object_store::BoxFut<'_, ()> {
+            Box::pin(async {
+                Err(crate::object_store::ObjectStoreError::Internal(
+                    "simulated S3 delete failure".into(),
+                ))
+            })
+        }
+        fn head(
+            &self,
+            key: &str,
+        ) -> crate::object_store::BoxFut<'_, crate::object_store::ObjectMeta> {
+            self.0.head(key)
+        }
+    }
+
+    /// F-stash-1 (HIGH): When Capabilities.cipher is None, `store_blob`
+    /// uploads the raw plaintext blob directly to S3 (engine.rs:255-265).
+    /// CLAUDE.md is explicit: "No plaintext at rest. Secrets, keys, and
+    /// sensitive data must be encrypted before touching disk." The
+    /// correct failure mode is fail-closed — return an error. This is
+    /// the single most dangerous behaviour in the engine: in production
+    /// (server main.rs:113 constructs `Capabilities::for_tests()` so
+    /// cipher IS None by default), every Stash blob is stored UNENCRYPTED.
+    #[tokio::test]
+    async fn debt_1_store_without_cipher_must_fail_closed() {
+        let store_kv =
+            shroudb_storage::test_util::create_test_store("stash-debt-1-fail-closed").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let caps = Capabilities::for_tests(); // cipher = None
+        let engine = StashEngine::new(store_kv, obj_store.clone(), caps, StashConfig::default())
+            .await
+            .unwrap();
+
+        let secret = b"highly sensitive blob";
+        let result = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "secret-1",
+                data: secret,
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await;
+
+        assert!(
+            result.is_err(),
+            "STORE without Cipher must fail-closed (CLAUDE.md: no plaintext at rest); \
+             currently stash uploads plaintext to S3 and returns Ok"
+        );
+
+        // Belt-and-braces: if a bug does allow Ok, verify the S3 object
+        // does not contain our plaintext secret.
+        if result.is_ok() {
+            let objects = obj_store.clone();
+            // Scan all stored bytes.
+            let key = format!("{TEST_TENANT}/secret-1");
+            if let Ok(data) = objects.get(&key).await {
+                assert!(
+                    !data.windows(secret.len()).any(|w| w == secret),
+                    "plaintext bytes found in S3 — envelope encryption bypassed"
+                );
+            }
+        }
+    }
+
+    /// F-stash-2 (HIGH): When Capabilities.sentry is None, every
+    /// `check_policy` call returns Ok (engine.rs:990-993). This is
+    /// fail-OPEN on the engine's ABAC layer. The server main.rs wires
+    /// `Capabilities::for_tests()` (sentry=None), so every operation —
+    /// STORE, RETRIEVE, INSPECT, REVOKE, REWRAP, FINGERPRINT, TRACE —
+    /// is permitted with no policy enforcement. CLAUDE.md: "fail closed,
+    /// not open". Also mirrors the Sigil capability-unwired bug.
+    #[tokio::test]
+    async fn debt_2_retrieve_without_sentry_must_fail_closed() {
+        let store_kv =
+            shroudb_storage::test_util::create_test_store("stash-debt-2-sentry-closed").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let caps = Capabilities {
+            cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
+        };
+        let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
+            .await
+            .unwrap();
+
+        // Seed a blob.
+        engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "seeded",
+                data: b"whatever",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: Some("seeder"),
+            })
+            .await
+            .unwrap();
+
+        // An UNAUTHENTICATED caller retrieves the blob. With no Sentry
+        // wired, today this succeeds. Fail-closed requires this to err.
+        let result = engine.retrieve_blob(TEST_TENANT, "seeded", None).await;
+        assert!(
+            result.is_err(),
+            "RETRIEVE without a wired policy evaluator must fail-closed \
+             (CLAUDE.md: fail closed, not open). Today check_policy returns \
+             Ok when sentry is None, so every unauthenticated caller gets \
+             blobs."
+        );
+    }
+
+    /// F-stash-3 (HIGH): `emit_audit` silently swallows Chronicle
+    /// errors (engine.rs:1094-1101). Every operation that fails to
+    /// persist its audit event still returns Ok to the caller, breaking
+    /// the audit-trail invariant. For security-critical operations,
+    /// audit emission failure must propagate.
+    #[tokio::test]
+    async fn debt_3_audit_failure_must_propagate_to_caller() {
+        let store_kv =
+            shroudb_storage::test_util::create_test_store("stash-debt-3-audit-fail").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let caps = Capabilities {
+            cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::Enabled(Arc::new(BrokenChronicle)),
+        };
+        let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
+            .await
+            .unwrap();
+
+        let result = engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "audited",
+                data: b"payload",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: Some("alice"),
+            })
+            .await;
+
+        assert!(
+            result.is_err(),
+            "STORE must fail when Chronicle emission fails — today the \
+             engine logs a warning and returns Ok, so an attacker who can \
+             disrupt the audit sink can STORE/RETRIEVE invisibly"
+        );
+    }
+
+    /// F-stash-4 (MED): On hard-revoke, `object_store.delete` errors
+    /// for the master S3 object (engine.rs:613-619) and viewer objects
+    /// (engine.rs:560-567) are swallowed — the engine logs a warning
+    /// and proceeds to mark the blob Shredded. If S3 delete fails, the
+    /// ciphertext survives. The wrapped DEK is destroyed, which *does*
+    /// make the ciphertext unreadable — but the engine does not surface
+    /// the failure. Callers cannot distinguish a complete crypto-shred
+    /// from a "DEK destroyed, ciphertext still in S3" partial.
+    #[tokio::test]
+    async fn debt_4_hard_revoke_must_propagate_s3_delete_failure() {
+        let inner = Arc::new(InMemoryObjectStore::new());
+        let failing = Arc::new(DeleteFailingObjectStore(inner.clone()));
+        let store_kv =
+            shroudb_storage::test_util::create_test_store("stash-debt-4-revoke-fail").await;
+        let caps = Capabilities {
+            cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
+        };
+        let engine = StashEngine::new(store_kv, failing.clone(), caps, StashConfig::default())
+            .await
+            .unwrap();
+
+        // Store a blob successfully.
+        engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "to-revoke",
+                data: b"destroy me",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await
+            .unwrap();
+
+        // Hard-revoke — with failing object store, this must error.
+        let revoke_result = engine
+            .revoke_blob(TEST_TENANT, "to-revoke", false, None)
+            .await;
+
+        assert!(
+            revoke_result.is_err(),
+            "hard-revoke must propagate S3 delete failure — today the \
+             engine swallows the error, marks the blob Shredded, and \
+             returns Ok, leaving ciphertext in S3 without telling the \
+             caller that crypto-shred was incomplete"
+        );
+    }
+
+    /// F-stash-5 (HIGH): When Cipher IS absent and a blob is stored
+    /// raw (the fail-open path we're trying to close in debt_1),
+    /// retrieving it is allowed even though:
+    /// - The metadata has `wrapped_dek.is_empty() == true` (engine.rs:375-378)
+    /// - The engine short-circuits past the decrypt path and returns
+    ///   the raw bytes directly.
+    /// This lets an attacker who can get Cipher unavailable (network
+    /// partition, Cipher down) read blobs with NO cryptographic check.
+    #[tokio::test]
+    async fn debt_5_retrieve_raw_blob_must_fail_closed() {
+        let store_kv =
+            shroudb_storage::test_util::create_test_store("stash-debt-5-retrieve-raw").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+
+        // Step 1: Store with cipher absent (today succeeds — the fail-open bug).
+        let caps_no_cipher = Capabilities::for_tests();
+        let engine_no_cipher = StashEngine::new(
+            store_kv.clone(),
+            obj_store.clone(),
+            caps_no_cipher,
+            StashConfig::default(),
+        )
+        .await
+        .unwrap();
+        let store_result = engine_no_cipher
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "raw-blob",
+                data: b"leaky plaintext",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: None,
+            })
+            .await;
+
+        // If debt_1 is fixed, STORE errs here and we short-circuit.
+        if store_result.is_err() {
+            return;
+        }
+
+        // Step 2: A fresh engine WITH cipher attached tries to retrieve.
+        // It must refuse: the stored blob has no wrapped DEK, so there is
+        // no authenticated-encryption path. Today the engine returns the
+        // raw bytes as-if plaintext.
+        let caps_with_cipher = Capabilities {
+            cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
+        };
+        let engine_with_cipher = StashEngine::new(
+            store_kv,
+            obj_store,
+            caps_with_cipher,
+            StashConfig::default(),
+        )
+        .await
+        .unwrap();
+        let result = engine_with_cipher
+            .retrieve_blob(TEST_TENANT, "raw-blob", None)
+            .await;
+
+        assert!(
+            result.is_err(),
+            "RETRIEVE of a blob with empty wrapped_dek must fail-closed; \
+             today the engine returns raw S3 bytes, defeating envelope \
+             encryption entirely"
+        );
+    }
+
+    /// F-stash-6 (MED): `retrieve_blob` decryption failure path for
+    /// blobs predating the AAD binding (engine.rs:390-404) uses
+    /// `decrypt_blob_compat` which tries the empty-AAD fallback. This
+    /// silently accepts ciphertext authenticated against a different
+    /// AAD than the blob ID. Legitimate "upgrade" path, but the engine
+    /// emits a tracing warning only — there is no Chronicle event, so
+    /// an attacker re-uploading an old-format blob under a new ID can
+    /// successfully decrypt under the new ID. This test demands that
+    /// legacy-AAD decrypts emit a distinct Chronicle event so they can
+    /// be monitored.
+    #[tokio::test]
+    async fn debt_6_legacy_aad_decrypt_must_emit_distinct_audit_event() {
+        let store_kv =
+            shroudb_storage::test_util::create_test_store("stash-debt-6-legacy-audit").await;
+        let obj_store = Arc::new(InMemoryObjectStore::new());
+        let chronicle = Arc::new(RecordingChronicle::default());
+        let caps = Capabilities {
+            cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::Enabled(chronicle.clone()),
+        };
+        let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
+            .await
+            .unwrap();
+
+        engine
+            .store_blob(StoreBlobParams {
+                tenant: TEST_TENANT,
+                id: "modern",
+                data: b"abc",
+                content_type: None,
+                keyring: None,
+                client_encrypted: false,
+                wrapped_dek: None,
+                actor: Some("a"),
+            })
+            .await
+            .unwrap();
+
+        // Normal retrieve — should NOT emit a legacy event.
+        engine
+            .retrieve_blob(TEST_TENANT, "modern", Some("a"))
+            .await
+            .unwrap();
+
+        let legacy_events: Vec<_> = chronicle
+            .events()
+            .into_iter()
+            .filter(|e| e.operation.contains("LEGACY") || e.operation.contains("legacy"))
+            .collect();
+        // Today no legacy event type exists at all; the taxonomy doesn't
+        // distinguish modern from legacy-AAD retrieves. We require one.
+        assert!(
+            chronicle
+                .events()
+                .iter()
+                .any(|e| e.metadata.contains_key("aad_binding")),
+            "RETRIEVE audit events must record the AAD-binding mode \
+             (modern vs. legacy compat fallback) in metadata, so ops can \
+             detect when legacy decrypts are still happening. Today \
+             metadata is empty and monitoring has to parse log lines. \
+             legacy_events so far: {}",
+            legacy_events.len()
+        );
     }
 }

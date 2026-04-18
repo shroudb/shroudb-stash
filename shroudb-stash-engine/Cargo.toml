@@ -14,9 +14,11 @@ s3 = ["dep:aws-config", "dep:aws-sdk-s3", "dep:aws-smithy-types"]
 [dependencies]
 shroudb-stash-core.workspace = true
 shroudb-acl.workspace = true
+shroudb-audit.workspace = true
 shroudb-chronicle-core.workspace = true
 shroudb-crypto.workspace = true
 shroudb-store.workspace = true
+shroudb-server-bootstrap.workspace = true
 
 ring.workspace = true
 zeroize.workspace = true

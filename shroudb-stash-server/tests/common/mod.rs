@@ -133,14 +133,15 @@ impl TestServer {
 
         // Build the in-process engine.
         let store = shroudb_storage::test_util::create_test_store("stash-integ").await;
+        use shroudb_server_bootstrap::Capability;
         let caps = Capabilities {
             cipher: if config.no_cipher {
-                None
+                Capability::DisabledForTests
             } else {
-                Some(Box::new(MockCipherOps::new()))
+                Capability::Enabled(Box::new(MockCipherOps::new()))
             },
-            sentry: None,
-            chronicle: None,
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
         };
         let engine = Arc::new(
             StashEngine::new(store, object_store, caps, StashConfig::default())

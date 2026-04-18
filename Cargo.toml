@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.92"
 license = "LicenseRef-Proprietary"
@@ -19,14 +19,15 @@ publish = ["shroudb"]
 
 [workspace.dependencies]
 # Internal crates
-shroudb-stash-core = { path = "shroudb-stash-core", version = "0.5.0", registry = "shroudb" }
-shroudb-stash-engine = { path = "shroudb-stash-engine", version = "0.5.0", registry = "shroudb" }
-shroudb-stash-protocol = { path = "shroudb-stash-protocol", version = "0.5.0", registry = "shroudb" }
-shroudb-stash-client = { path = "shroudb-stash-client", version = "0.5.0", registry = "shroudb" }
+shroudb-stash-core = { path = "shroudb-stash-core", version = "0.6.0", registry = "shroudb" }
+shroudb-stash-engine = { path = "shroudb-stash-engine", version = "0.6.0", registry = "shroudb" }
+shroudb-stash-protocol = { path = "shroudb-stash-protocol", version = "0.6.0", registry = "shroudb" }
+shroudb-stash-client = { path = "shroudb-stash-client", version = "0.6.0", registry = "shroudb" }
 
 # Commons
 shroudb-acl = { version = "0.2.0", registry = "shroudb" }
-shroudb-chronicle-core = { version = "1.5.0", registry = "shroudb" }
+shroudb-audit = { version = "0.1.0", registry = "shroudb" }
+shroudb-chronicle-core = { version = "1.11.0", registry = "shroudb" }
 shroudb-crypto = { version = "0.1.4", registry = "shroudb" }
 shroudb-storage = { version = "0.4.0", registry = "shroudb" }
 shroudb-store = { version = "0.2.0", registry = "shroudb" }
@@ -34,7 +35,8 @@ shroudb-client = { version = "1.1.0", registry = "shroudb" }
 shroudb-protocol-wire = { version = "0.2.0", registry = "shroudb" }
 shroudb-server-tcp = { version = "0.2.2", registry = "shroudb" }
 tokio-rustls = "0.26"
-shroudb-server-bootstrap = { version = "0.1.3", registry = "shroudb" }
+shroudb-server-bootstrap = { version = "0.2.0", registry = "shroudb" }
+shroudb-engine-bootstrap = { version = "0.1.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.2.0", registry = "shroudb" }
 
 # Async

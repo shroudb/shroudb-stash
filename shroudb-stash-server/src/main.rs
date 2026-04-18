@@ -67,8 +67,11 @@ async fn main() -> anyhow::Result<()> {
                 shroudb_server_bootstrap::open_storage(&cfg.store.data_dir, key_source.as_ref())
                     .await
                     .context("failed to open storage engine")?;
-            let store = Arc::new(shroudb_storage::EmbeddedStore::new(storage, "stash"));
-            run_server(cfg, store).await
+            let store = Arc::new(shroudb_storage::EmbeddedStore::new(
+                storage.clone(),
+                "stash",
+            ));
+            run_server(cfg, store, Some(storage)).await
         }
         "remote" => {
             let uri = cfg
@@ -82,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("failed to connect to remote store")?,
             );
-            run_server(cfg, store).await
+            run_server(cfg, store, None).await
         }
         other => anyhow::bail!("unknown store mode: {other}"),
     }
@@ -91,7 +94,10 @@ async fn main() -> anyhow::Result<()> {
 async fn run_server<S: Store + 'static>(
     cfg: StashServerConfig,
     store: Arc<S>,
+    storage: Option<Arc<shroudb_storage::StorageEngine>>,
 ) -> anyhow::Result<()> {
+    use shroudb_server_bootstrap::Capability;
+
     // S3 object store
     let s3_config = S3Config {
         bucket: cfg.engine.bucket.clone(),
@@ -104,13 +110,50 @@ async fn run_server<S: Store + 'static>(
             .context("failed to connect to S3")?,
     );
 
+    // Resolve [audit] and [policy] capabilities — no silent None.
+    let audit_cfg = cfg.audit.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing [audit] config section. Pick one:\n  \
+             [audit] mode = \"remote\" addr = \"chronicle.internal:7300\"\n  \
+             [audit] mode = \"embedded\"\n  \
+             [audit] mode = \"disabled\" justification = \"<reason>\""
+        )
+    })?;
+    let audit_cap = audit_cfg
+        .resolve(storage.clone())
+        .await
+        .context("failed to resolve [audit] capability")?;
+    let policy_cfg = cfg.policy.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "missing [policy] config section. Pick one:\n  \
+             [policy] mode = \"remote\" addr = \"sentry.internal:7100\"\n  \
+             [policy] mode = \"embedded\"\n  \
+             [policy] mode = \"disabled\" justification = \"<reason>\""
+        )
+    })?;
+    let policy_cap = policy_cfg
+        .resolve(storage.clone(), audit_cap.as_ref().cloned())
+        .await
+        .context("failed to resolve [policy] capability")?;
+
+    // Cipher for Stash is not yet wired at the standalone-server layer:
+    // STORE/RETRIEVE rely on envelope encryption via Cipher. Until this
+    // server gets its own [cipher] config + wiring (mirroring Scroll), the
+    // slot is explicit DisabledWithJustification so operators see WHY
+    // data-plane ops refuse. Embedded Cipher wiring via Moat is the
+    // supported path in the meantime.
+    let cipher_cap =
+        Capability::<Box<dyn shroudb_stash_engine::capabilities::StashCipherOps>>::disabled(
+            "stash-server standalone cipher wiring not yet implemented; use Moat for embedded cipher",
+        );
+
     // Stash engine
     let stash_config = StashConfig {
         default_keyring: cfg.engine.keyring.clone(),
         s3_key_prefix: cfg.engine.s3_key_prefix.clone(),
         ..Default::default()
     };
-    let capabilities = Capabilities::default();
+    let capabilities = Capabilities::new(cipher_cap, policy_cap, audit_cap);
     let engine = Arc::new(
         StashEngine::new(store, object_store, capabilities, stash_config)
             .await
@@ -177,4 +220,21 @@ async fn run_server<S: Store + 'static>(
     let _ = tcp_handle.await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_debug_asserts() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn cli_accepts_config_flag() {
+        let parsed = Cli::try_parse_from(["shroudb-stash", "--config", "stash.toml"]).unwrap();
+        assert_eq!(parsed.config.as_deref(), Some("stash.toml"));
+    }
 }

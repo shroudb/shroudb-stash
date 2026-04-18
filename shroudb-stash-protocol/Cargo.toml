@@ -23,4 +23,5 @@ base64.workspace = true
 tokio = { workspace = true }
 shroudb-storage = { workspace = true, features = ["testing"] }
 shroudb-crypto.workspace = true
+shroudb-server-bootstrap.workspace = true
 ring.workspace = true

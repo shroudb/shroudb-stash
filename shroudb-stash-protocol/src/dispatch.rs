@@ -304,9 +304,9 @@ mod tests {
         let store = shroudb_storage::test_util::create_test_store("stash-proto-test").await;
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let caps = Capabilities {
-            cipher: Some(Box::new(MockCipherOps::new())),
-            sentry: None,
-            chronicle: None,
+            cipher: shroudb_server_bootstrap::Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: shroudb_server_bootstrap::Capability::DisabledForTests,
+            chronicle: shroudb_server_bootstrap::Capability::DisabledForTests,
         };
         StashEngine::new(store, obj_store, caps, StashConfig::default())
             .await
