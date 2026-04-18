@@ -71,3 +71,16 @@ Stash uses Cipher's **envelope encryption** pattern:
 - **Upstream:** commons (shroudb-store, shroudb-acl, shroudb-crypto, shroudb-chronicle-core), aws-sdk-s3
 - **Downstream:** shroudb-moat (embeds engine + protocol)
 - **Capability deps:** Cipher (envelope encryption), Sentry (ABAC policy gating), Chronicle (audit events)
+
+## No dated audit markdown files
+
+Audit findings live in two places:
+1. Failing tests named `debt_<n>_<what>_must_<expected>` (hard ratchet — no `#[ignore]`).
+2. This repo's `TODOS.md`, indexing the debt tests by ID.
+
+Do NOT create:
+- `ENGINE_REVIEW*.md`, `*_REVIEW*.md`, `AUDIT_*.md`, `REVIEW_*.md`
+- Any dated snapshot (`*_2026-*.md`, etc.)
+- Status / progress / summary markdown that ages out of date
+
+Past audits accumulated 17+ `ENGINE_REVIEW_v*.md` files claiming "zero open items, production-ready" while real gaps went unfixed. New agents read them as truth. They were all deleted 2026-04-17. The forcing function now is `cargo test -p <crate> debt_` — the tests are the source, `TODOS.md` is the index, and nothing else counts.
