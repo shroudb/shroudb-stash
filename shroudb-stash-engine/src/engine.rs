@@ -374,9 +374,18 @@ impl<S: Store> StashEngine<S> {
             // Client-encrypted: return raw data + wrapped DEK for client-side decryption.
             (encrypted_data, Some(metadata.wrapped_dek.clone()))
         } else if metadata.wrapped_dek.is_empty() {
-            // Stored without encryption (Cipher was absent at STORE time).
-            // Return raw bytes directly.
-            (encrypted_data, None)
+            // Server-encrypted blob with no wrapped DEK is incoherent: there
+            // is no authenticated-encryption path to verify the ciphertext.
+            // Fail-closed rather than return raw S3 bytes as if they were
+            // plaintext. This also shuts the door on legacy blobs left over
+            // from the pre-DEBT-1 fail-open STORE path.
+            tracing::error!(
+                blob_id = id,
+                "RETRIEVE refused: server-encrypted blob has no wrapped DEK"
+            );
+            return Err(StashError::Internal(format!(
+                "blob {id} has no wrapped DEK; crypto-shred or re-store required"
+            )));
         } else if let Some(cipher) = self.capabilities.cipher.as_ref() {
             // Server-side decryption: unwrap DEK via Cipher, decrypt locally.
             let plaintext_key = cipher.unwrap_data_key(&metadata.wrapped_dek).await?;
