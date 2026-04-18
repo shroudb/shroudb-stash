@@ -136,15 +136,15 @@ async fn run_server<S: Store + 'static>(
         .await
         .context("failed to resolve [policy] capability")?;
 
-    // Cipher for Stash is not yet wired at the standalone-server layer:
-    // STORE/RETRIEVE rely on envelope encryption via Cipher. Until this
-    // server gets its own [cipher] config + wiring (mirroring Scroll), the
-    // slot is explicit DisabledWithJustification so operators see WHY
-    // data-plane ops refuse. Embedded Cipher wiring via Moat is the
-    // supported path in the meantime.
+    // Cipher for Stash: STORE/RETRIEVE rely on envelope encryption via
+    // Cipher. The standalone server doesn't expose a [cipher] config
+    // section today (mirroring Scroll's pattern is follow-up scope).
+    // Embedded Cipher via Moat is the supported path. Making the slot
+    // explicit DisabledWithJustification surfaces WHY data-plane ops
+    // refuse at startup.
     let cipher_cap =
         Capability::<Box<dyn shroudb_stash_engine::capabilities::StashCipherOps>>::disabled(
-            "stash-server standalone cipher wiring not yet implemented; use Moat for embedded cipher",
+            "stash-server standalone deploys use Moat for embedded cipher; direct wiring is follow-up scope",
         );
 
     // Stash engine
