@@ -556,16 +556,25 @@ impl<S: Store> StashEngine<S> {
             // 1. Load and cascade viewer copies.
             let viewer_map = self.load_viewer_map(tenant, id).await.unwrap_or_default();
 
-            // Delete all viewer S3 objects.
+            // Delete all viewer S3 objects. If any delete fails, abort
+            // before crypto-shredding so the caller can retry with the
+            // ciphertext still decryptable.
             for viewer in &viewer_map.viewers {
-                if let Err(e) = self.object_store.delete(&viewer.s3_key).await {
-                    tracing::warn!(
-                        blob_id = id,
-                        viewer_id = %viewer.viewer_id,
-                        error = %e,
-                        "failed to delete viewer S3 object during revoke"
-                    );
-                }
+                self.object_store
+                    .delete(&viewer.s3_key)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            blob_id = id,
+                            viewer_id = %viewer.viewer_id,
+                            error = %e,
+                            "failed to delete viewer S3 object during revoke"
+                        );
+                        StashError::ObjectStore(format!(
+                            "viewer {} delete failed: {e}",
+                            viewer.viewer_id
+                        ))
+                    })?;
             }
 
             // 2. Handle dedup-aware S3 object and DEK cleanup.
@@ -611,15 +620,23 @@ impl<S: Store> StashEngine<S> {
                 }
             }
 
-            if should_delete_s3 && let Err(e) = self.object_store.delete(&metadata.s3_key).await {
-                tracing::warn!(
-                    blob_id = id,
-                    error = %e,
-                    "failed to delete master S3 object during revoke"
-                );
+            if should_delete_s3 {
+                self.object_store
+                    .delete(&metadata.s3_key)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            blob_id = id,
+                            error = %e,
+                            "failed to delete master S3 object during revoke"
+                        );
+                        StashError::ObjectStore(format!("master delete failed: {e}"))
+                    })?;
             }
 
-            // 3. Crypto-shred: destroy the wrapped DEK.
+            // 3. Crypto-shred: destroy the wrapped DEK. Only reach here
+            // once every S3 delete has succeeded, so the metadata flip
+            // accurately reflects that the ciphertext is gone.
             metadata.wrapped_dek.clear();
             metadata.status = BlobStatus::Shredded;
             metadata.updated_at = now;
