@@ -980,7 +980,13 @@ impl<S: Store> StashEngine<S> {
         Ok(results)
     }
 
-    /// Check ABAC policy via Sentry (if available).
+    /// Check ABAC policy via Sentry.
+    ///
+    /// Fails closed when Sentry is not `Enabled`: returning `Ok(())` on a
+    /// disabled capability would let every caller through with no policy
+    /// check. The structured `AbacDenied` error names the missing
+    /// capability so operators can distinguish "policy denied this actor"
+    /// from "no policy evaluator wired at all".
     async fn check_policy(
         &self,
         tenant: &str,
@@ -988,9 +994,21 @@ impl<S: Store> StashEngine<S> {
         action: &str,
         actor: Option<&str>,
     ) -> Result<(), StashError> {
-        let sentry = match self.capabilities.sentry.as_ref() {
-            Some(s) => s,
-            None => return Ok(()), // Sentry disabled = no ABAC gating.
+        let sentry = match self.capabilities.sentry.require("sentry") {
+            Ok(s) => s,
+            Err(disabled) => {
+                tracing::error!(
+                    action,
+                    resource = resource_id,
+                    reason = disabled.reason,
+                    "policy check refused: sentry capability not enabled"
+                );
+                return Err(StashError::AbacDenied {
+                    action: action.to_string(),
+                    resource: resource_id.to_string(),
+                    policy: format!("sentry-disabled:{}", disabled.reason),
+                });
+            }
         };
 
         let actor_id = actor.unwrap_or("anonymous");
@@ -1183,6 +1201,33 @@ mod tests {
         }
     }
 
+    /// PolicyEvaluator that always permits — used by the default test
+    /// harness so existing behavioural tests do not inadvertently assert
+    /// on the fail-closed sentry-absent path.
+    struct AllowAllSentry;
+    impl shroudb_acl::PolicyEvaluator for AllowAllSentry {
+        fn evaluate(
+            &self,
+            _request: &shroudb_acl::PolicyRequest,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<shroudb_acl::PolicyDecision, shroudb_acl::AclError>,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async {
+                Ok(shroudb_acl::PolicyDecision {
+                    effect: shroudb_acl::PolicyEffect::Permit,
+                    matched_policy: Some("test-allow-all".into()),
+                    token: None,
+                    cache_until: None,
+                })
+            })
+        }
+    }
+
     use base64::Engine as _;
 
     async fn setup() -> StashEngine<shroudb_storage::EmbeddedStore> {
@@ -1191,7 +1236,7 @@ mod tests {
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(mock_cipher)),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         StashEngine::new(store, obj_store, caps, StashConfig::default())
@@ -1442,7 +1487,7 @@ mod tests {
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(mock_cipher)),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
@@ -1469,7 +1514,12 @@ mod tests {
     async fn store_without_cipher_fails_closed() {
         let store_kv = shroudb_storage::test_util::create_test_store("stash-no-cipher").await;
         let obj_store = Arc::new(InMemoryObjectStore::new());
-        let caps = Capabilities::for_tests(); // No cipher
+        // Sentry enabled so we exercise the cipher-missing branch specifically.
+        let caps = Capabilities {
+            cipher: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
+            chronicle: Capability::DisabledForTests,
+        };
         let engine = StashEngine::new(store_kv, obj_store.clone(), caps, StashConfig::default())
             .await
             .unwrap();
@@ -1596,7 +1646,7 @@ mod tests {
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(mock_cipher)),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
@@ -1638,7 +1688,7 @@ mod tests {
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(mock_cipher)),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
@@ -1840,7 +1890,7 @@ mod tests {
         let mock_cipher = MockCipherOps::new();
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(mock_cipher)),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let config = StashConfig {
@@ -2329,17 +2379,23 @@ mod tests {
         let store_kv =
             shroudb_storage::test_util::create_test_store("stash-debt-2-sentry-closed").await;
         let obj_store = Arc::new(InMemoryObjectStore::new());
-        let caps = Capabilities {
+
+        // Seed via an engine with sentry ENABLED — the seed itself is not
+        // the subject under test.
+        let caps_with_sentry = Capabilities {
             cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
-        let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
-            .await
-            .unwrap();
-
-        // Seed a blob.
-        engine
+        let seeder = StashEngine::new(
+            store_kv.clone(),
+            obj_store.clone(),
+            caps_with_sentry,
+            StashConfig::default(),
+        )
+        .await
+        .unwrap();
+        seeder
             .store_blob(StoreBlobParams {
                 tenant: TEST_TENANT,
                 id: "seeded",
@@ -2353,6 +2409,18 @@ mod tests {
             .await
             .unwrap();
 
+        // Now a second engine on the same store with sentry DisabledForTests.
+        // RETRIEVE must fail-closed: there is no policy evaluator, so we
+        // cannot prove the caller is authorised — deny.
+        let caps_no_sentry = Capabilities {
+            cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
+            sentry: Capability::DisabledForTests,
+            chronicle: Capability::DisabledForTests,
+        };
+        let engine = StashEngine::new(store_kv, obj_store, caps_no_sentry, StashConfig::default())
+            .await
+            .unwrap();
+
         // An UNAUTHENTICATED caller retrieves the blob. With no Sentry
         // wired, today this succeeds. Fail-closed requires this to err.
         let result = engine.retrieve_blob(TEST_TENANT, "seeded", None).await;
@@ -2362,6 +2430,12 @@ mod tests {
              (CLAUDE.md: fail closed, not open). Today check_policy returns \
              Ok when sentry is None, so every unauthenticated caller gets \
              blobs."
+        );
+        assert!(
+            matches!(result.as_ref().unwrap_err(), StashError::AbacDenied { .. }),
+            "must surface AbacDenied so the caller sees a named policy refusal, \
+             got {:?}",
+            result.as_ref().err()
         );
     }
 
@@ -2377,7 +2451,7 @@ mod tests {
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::Enabled(Arc::new(BrokenChronicle)),
         };
         let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
@@ -2421,7 +2495,7 @@ mod tests {
             shroudb_storage::test_util::create_test_store("stash-debt-4-revoke-fail").await;
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let engine = StashEngine::new(store_kv, failing.clone(), caps, StashConfig::default())
@@ -2505,7 +2579,7 @@ mod tests {
         // raw bytes as-if plaintext.
         let caps_with_cipher = Capabilities {
             cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let engine_with_cipher = StashEngine::new(
@@ -2546,7 +2620,7 @@ mod tests {
         let chronicle = Arc::new(RecordingChronicle::default());
         let caps = Capabilities {
             cipher: Capability::Enabled(Box::new(MockCipherOps::new())),
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::Enabled(chronicle.clone()),
         };
         let engine = StashEngine::new(store_kv, obj_store, caps, StashConfig::default())
