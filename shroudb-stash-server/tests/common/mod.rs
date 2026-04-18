@@ -122,19 +122,58 @@ pub struct TestServer {
     pub s3_endpoint: Option<String>,
     /// S3 bucket name.
     pub s3_bucket: Option<String>,
+    /// First token wired into the server, used by `TestServer::client`.
+    first_token: Option<String>,
 }
 
+/// The token injected by `TestServer` when the caller does not supply
+/// any. Tests connect via `server.client().await` and pick up this
+/// token automatically — dispatch now fails-closed on auth-less
+/// tenant-scoped commands, so every test needs an auth context.
+pub const DEFAULT_TEST_TOKEN: &str = "integration-test-token";
+/// Tenant associated with [`DEFAULT_TEST_TOKEN`].
+pub const DEFAULT_TEST_TENANT: &str = "default";
+
 impl TestServer {
-    /// Start a test server with default config (no auth, in-memory store).
+    /// Start a test server with default config (single platform token,
+    /// in-memory store).
     pub async fn start() -> Self {
         Self::start_with_config(TestServerConfig::default())
             .await
             .expect("test server failed to start")
     }
 
+    /// Connect a Stash client and authenticate with the test token that
+    /// `TestServer` auto-injected (or the first token supplied via
+    /// `TestServerConfig::tokens`). Tests that explicitly configure
+    /// multiple tokens should call `connect` + `auth` themselves.
+    pub async fn client(&self) -> shroudb_stash_client::StashClient {
+        let mut client = shroudb_stash_client::StashClient::connect(&self.tcp_addr)
+            .await
+            .expect("connect failed");
+        let token = self.first_token.as_deref().unwrap_or(DEFAULT_TEST_TOKEN);
+        client.auth(token).await.expect("auth failed");
+        client
+    }
+
     /// Start a test server with custom config.
     /// Returns None if MinIO is requested but Docker is not available.
-    pub async fn start_with_config(config: TestServerConfig) -> Option<Self> {
+    pub async fn start_with_config(mut config: TestServerConfig) -> Option<Self> {
+        // If the caller did not configure any tokens, wire up a single
+        // platform token so `server.client()` can authenticate. Dispatch
+        // fails-closed on auth-less tenant-scoped commands, so every
+        // integration test needs an auth context.
+        if config.tokens.is_empty() {
+            config.tokens.push(TestToken {
+                raw: DEFAULT_TEST_TOKEN.to_string(),
+                tenant: DEFAULT_TEST_TENANT.to_string(),
+                actor: "integration-test".to_string(),
+                platform: true,
+                grants: vec![],
+            });
+        }
+        let first_token = config.tokens.first().map(|t| t.raw.clone());
+
         // Build object store (InMemory or MinIO-backed S3).
         let (object_store, minio_container, s3_endpoint, s3_bucket): (
             Arc<dyn ObjectStore>,
@@ -208,6 +247,7 @@ impl TestServer {
             minio_container,
             s3_endpoint,
             s3_bucket,
+            first_token,
         })
     }
 

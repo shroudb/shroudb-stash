@@ -11,9 +11,7 @@ use common::*;
 #[tokio::test]
 async fn test_health() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client.health().await.expect("health check failed");
 }
@@ -25,9 +23,7 @@ async fn test_health() {
 #[tokio::test]
 async fn test_store_and_retrieve() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let plaintext = b"hello, stash integration test!";
 
@@ -68,9 +64,7 @@ async fn test_store_and_retrieve_minio() {
             return;
         }
     };
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let plaintext = b"hello from MinIO!";
 
@@ -119,9 +113,7 @@ async fn test_hard_revoke_deletes_s3_object_minio() {
             return;
         }
     };
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client
         .store("revoke-s3", b"delete from S3", None, None)
@@ -175,9 +167,7 @@ async fn test_large_blob_minio() {
             return;
         }
     };
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     // 512 KB blob.
     let large_data = vec![0xCDu8; 512 * 1024];
@@ -206,9 +196,7 @@ async fn test_large_blob_minio() {
 #[tokio::test]
 async fn test_binary_with_null_bytes() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     // Binary data with null bytes, high bytes, and control characters.
     let binary_data: Vec<u8> = (0..=255).collect();
@@ -237,9 +225,7 @@ async fn test_binary_with_null_bytes() {
 #[tokio::test]
 async fn test_client_encrypted_passthrough() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     // Valid ciphertext: at least 28 bytes (12-byte nonce + 16-byte auth tag)
     let ciphertext = &[0xAA; 64];
@@ -274,9 +260,7 @@ async fn test_client_encrypted_passthrough() {
 #[tokio::test]
 async fn test_client_encrypted_rejects_invalid_dek() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let ciphertext = &[0xAA; 64];
 
@@ -297,9 +281,7 @@ async fn test_client_encrypted_rejects_invalid_dek() {
 #[tokio::test]
 async fn test_client_encrypted_rejects_short_ciphertext() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let valid_dek = base64::engine::general_purpose::STANDARD.encode([0xBB; 48]);
 
@@ -318,9 +300,7 @@ async fn test_client_encrypted_rejects_short_ciphertext() {
 #[tokio::test]
 async fn test_inspect() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let plaintext = b"inspect me";
     client
@@ -348,9 +328,7 @@ async fn test_inspect() {
 #[tokio::test]
 async fn test_multiple_blobs() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     for i in 0..5 {
         let id = format!("multi-{i}");
@@ -379,9 +357,7 @@ async fn test_multiple_blobs() {
 #[tokio::test]
 async fn test_hard_revoke() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client
         .store("del-1", b"delete me", None, None)
@@ -418,9 +394,7 @@ async fn test_hard_revoke() {
 #[tokio::test]
 async fn test_double_hard_revoke_fails() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client
         .store("double-rev", b"data", None, None)
@@ -446,9 +420,7 @@ async fn test_double_hard_revoke_fails() {
 #[tokio::test]
 async fn test_soft_revoke() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client
         .store("soft-1", b"soft revoke test", None, None)
@@ -477,9 +449,7 @@ async fn test_soft_revoke() {
 #[tokio::test]
 async fn test_store_with_metadata() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let png_data = b"\x89PNG\r\n\x1a\nfake-png-data";
 
@@ -513,9 +483,7 @@ async fn test_store_with_metadata() {
 #[tokio::test]
 async fn test_duplicate_store_rejected() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client
         .store("dup-1", b"first", None, None)
@@ -533,9 +501,7 @@ async fn test_duplicate_store_rejected() {
 #[tokio::test]
 async fn test_nonexistent_object_returns_error() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let err = client.retrieve("does-not-exist").await;
     assert!(err.is_err(), "retrieve nonexistent blob should fail");
@@ -554,9 +520,7 @@ async fn test_nonexistent_object_returns_error() {
 #[tokio::test]
 async fn test_large_blob_roundtrip() {
     let server = TestServer::start().await;
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let large_data = vec![0xABu8; 256 * 1024];
 
@@ -621,6 +585,8 @@ async fn test_acl_unauthenticated_rejected() {
     let server = TestServer::start_with_config(auth_server_config())
         .await
         .expect("test server failed to start");
+    // Intentionally skip the auto-auth helper: this test exercises the
+    // no-auth path.
     let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
         .await
         .expect("connect failed");
@@ -645,9 +611,7 @@ async fn test_acl_admin_full_access() {
     let server = TestServer::start_with_config(auth_server_config())
         .await
         .expect("test server failed to start");
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client.auth("admin-token").await.expect("admin auth failed");
 
@@ -679,9 +643,7 @@ async fn test_acl_app_token_read_write() {
     let server = TestServer::start_with_config(auth_server_config())
         .await
         .expect("test server failed to start");
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     client.auth("app-token").await.expect("app auth failed");
 
@@ -725,9 +687,7 @@ async fn test_acl_readonly_token_cannot_write() {
         .expect("admin store failed");
 
     // Now connect with readonly token.
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
     client
         .auth("readonly-token")
         .await
@@ -758,9 +718,7 @@ async fn test_acl_wrong_token_rejected() {
     let server = TestServer::start_with_config(auth_server_config())
         .await
         .expect("test server failed to start");
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let err = client.auth("totally-wrong-token").await;
     assert!(err.is_err(), "wrong token should be rejected");
@@ -778,9 +736,7 @@ async fn test_no_cipher_server_encrypted_store_fails_closed() {
     })
     .await
     .expect("test server failed to start");
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let plaintext = b"would-be-plaintext";
 
@@ -809,9 +765,7 @@ async fn test_no_cipher_client_encrypted_passthrough_still_works() {
     })
     .await
     .expect("test server failed to start");
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     // Client-encrypted passthrough does not need a server-side Cipher —
     // the client owns encryption. Stash just stores the ciphertext as-is.
@@ -858,9 +812,7 @@ async fn test_no_cipher_with_minio_fails_closed() {
             return;
         }
     };
-    let mut client = shroudb_stash_client::StashClient::connect(&server.tcp_addr)
-        .await
-        .expect("connect failed");
+    let mut client = server.client().await;
 
     let data = b"secret that must never reach S3 as plaintext";
 

@@ -1,4 +1,4 @@
-use shroudb_acl::AuthContext;
+use shroudb_acl::{AclRequirement, AuthContext};
 use shroudb_protocol_wire::WIRE_PROTOCOL;
 use shroudb_stash_engine::engine::{StashEngine, StoreBlobParams, StoreResult};
 use shroudb_store::Store;
@@ -25,14 +25,33 @@ const SUPPORTED_COMMANDS: &[&str] = &[
 /// Dispatch a parsed command to the StashEngine and produce a response.
 ///
 /// `auth_context` is the authenticated identity for this connection/request.
-/// `None` means auth is disabled (dev mode / no auth config).
+/// `None` means the connection has not completed AUTH yet.
+///
+/// Fail-closed posture for tenant-scoped commands: if `auth_context` is
+/// `None`, commands that touch a tenant namespace are refused outright
+/// rather than falling back to a synthesised `"default"` tenant. Only
+/// the infrastructure commands that carry `AclRequirement::None`
+/// (HEALTH / PING / COMMAND LIST / HELLO / AUTH) may proceed without
+/// an established identity.
 pub async fn dispatch<S: Store>(
     engine: &StashEngine<S>,
     cmd: StashCommand,
     auth_context: Option<&AuthContext>,
 ) -> StashResponse {
+    let requirement = cmd.acl_requirement();
+
+    // Refuse tenant-scoped commands when no auth context has been
+    // established. The default-tenant fallback would otherwise let an
+    // unauthenticated caller read or mutate whatever blobs live under
+    // tenant "default".
+    if auth_context.is_none() && !matches!(requirement, AclRequirement::None) {
+        return StashResponse::error(
+            "access denied: command requires an authenticated context (AUTH first)",
+        );
+    }
+
     // Check ACL requirement before dispatch.
-    if let Err(e) = shroudb_acl::check_dispatch_acl(auth_context, &cmd.acl_requirement()) {
+    if let Err(e) = shroudb_acl::check_dispatch_acl(auth_context, &requirement) {
         return StashResponse::error(e);
     }
 
@@ -697,6 +716,57 @@ mod tests {
                 );
             }
             _ => panic!("expected Error"),
+        }
+    }
+
+    /// F-stash-8 (L): when `auth_context` is None, dispatch used to
+    /// silently synthesise `tenant = "default"` for tenant-scoped
+    /// commands, so a connection that never authenticated could land
+    /// on a real tenant's namespace. Fail-closed behaviour is to
+    /// refuse tenant-scoped commands outright when no auth context
+    /// has been established — the caller must show identity first.
+    ///
+    /// Infrastructure commands (HEALTH, PING, COMMAND LIST, HELLO)
+    /// legitimately run without auth and are covered by
+    /// `health_and_ping` and `command_list`.
+    #[tokio::test]
+    async fn debt_stash_8_tenant_scoped_dispatch_without_auth_must_fail_closed() {
+        let engine = setup().await;
+
+        // Every tenant-scoped mutation/read must be refused without
+        // auth context — no silent "default" tenant synthesis.
+        let tenant_scoped: &[&[&str]] = &[
+            &["STORE", "nd-1", &STANDARD.encode(b"x")],
+            &["RETRIEVE", "nd-1"],
+            &["INSPECT", "nd-1"],
+            &["REWRAP", "nd-1"],
+            &["REVOKE", "nd-1"],
+            &["FINGERPRINT", "nd-1", "viewer-1"],
+            &["TRACE", "nd-1"],
+            &["LIST"],
+        ];
+
+        for args in tenant_scoped {
+            let cmd = parse_command(args).unwrap();
+            let resp = dispatch(&engine, cmd, None).await;
+            assert!(
+                !resp.is_ok(),
+                "{:?} must fail-closed without auth_context; got {:?}",
+                args,
+                resp
+            );
+            match resp {
+                StashResponse::Error(msg) => {
+                    let lower = msg.to_lowercase();
+                    assert!(
+                        lower.contains("auth")
+                            || lower.contains("denied")
+                            || lower.contains("tenant"),
+                        "error for {args:?} should name the missing auth context, got: {msg}"
+                    );
+                }
+                other => panic!("expected Error for {args:?}, got {other:?}"),
+            }
         }
     }
 }
