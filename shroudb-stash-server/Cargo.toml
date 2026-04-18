@@ -23,6 +23,10 @@ shroudb-server-tcp.workspace = true
 shroudb-server-bootstrap.workspace = true
 shroudb-engine-bootstrap.workspace = true
 shroudb-client.workspace = true
+shroudb-cipher-engine.workspace = true
+shroudb-cipher-core.workspace = true
+shroudb-cipher-client.workspace = true
+shroudb-crypto.workspace = true
 tokio-rustls.workspace = true
 
 tokio.workspace = true

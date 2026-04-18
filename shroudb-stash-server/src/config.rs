@@ -15,12 +15,100 @@ pub struct StashServerConfig {
     pub engine: EngineConfig,
     #[serde(default)]
     pub auth: ServerAuthConfig,
+    /// Cipher (envelope-encryption) capability slot.
+    ///
+    /// Two modes:
+    /// - `mode = "remote"`: point at an external `shroudb-cipher` server
+    /// - `mode = "embedded"`: bundle an in-process `CipherEngine` on the
+    ///   same `StorageEngine` as Stash's metadata (distinct namespace).
+    ///   Requires `store.mode = "embedded"`.
+    ///
+    /// Omit the section to run Stash without Cipher — STORE/RETRIEVE
+    /// will fail-closed with `CapabilityMissing("cipher")`.
+    #[serde(default)]
+    pub cipher: Option<CipherConfig>,
     /// Audit (Chronicle) capability slot. Absent = fail-closed at startup.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
     /// Policy (Sentry) capability slot. Same contract.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CipherConfig {
+    #[serde(default = "default_cipher_mode")]
+    pub mode: String,
+    #[serde(default = "default_cipher_keyring")]
+    pub keyring: String,
+
+    // Remote mode — validation accepts `mode = "remote"` but the actual
+    // TCP-client wiring lands in a follow-up (see stash-server main.rs
+    // for the bail! message). `addr` is validated here so config tests
+    // catch typos early; `auth_token` will join once remote wiring exists.
+    #[serde(default)]
+    pub addr: Option<String>,
+
+    // Embedded mode
+    #[serde(default = "default_rotation_days")]
+    pub rotation_days: u32,
+    #[serde(default = "default_drain_days")]
+    pub drain_days: u32,
+    #[serde(default = "default_scheduler_interval_secs")]
+    pub scheduler_interval_secs: u64,
+    #[serde(default = "default_cipher_algorithm")]
+    pub algorithm: String,
+}
+
+impl CipherConfig {
+    pub fn is_embedded(&self) -> bool {
+        self.mode == "embedded"
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.mode == "remote"
+    }
+
+    pub fn validate(&self, store_mode: &str) -> anyhow::Result<()> {
+        match self.mode.as_str() {
+            "remote" => {
+                if self.addr.is_none() {
+                    anyhow::bail!("cipher.mode = \"remote\" requires cipher.addr");
+                }
+            }
+            "embedded" => {
+                if store_mode != "embedded" {
+                    anyhow::bail!(
+                        "cipher.mode = \"embedded\" requires store.mode = \"embedded\" \
+                         (embedded Cipher shares the StorageEngine with Stash)"
+                    );
+                }
+            }
+            other => anyhow::bail!(
+                "unknown cipher.mode: {other:?} (expected \"remote\" or \"embedded\")"
+            ),
+        }
+        Ok(())
+    }
+}
+
+fn default_cipher_mode() -> String {
+    "remote".into()
+}
+fn default_cipher_keyring() -> String {
+    "stash-blobs".into()
+}
+fn default_rotation_days() -> u32 {
+    90
+}
+fn default_drain_days() -> u32 {
+    30
+}
+fn default_scheduler_interval_secs() -> u64 {
+    3600
+}
+fn default_cipher_algorithm() -> String {
+    "aes-256-gcm".into()
 }
 
 #[derive(Debug, Deserialize)]

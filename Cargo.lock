@@ -1805,6 +1805,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "obfuskey"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87fe8b243d2fdffa464d500b57ab0a4e9a1c4c9daa6cecb5cb56632209f2f1f7"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2457,9 +2468,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-client"
-version = "1.11.0"
+version = "1.12.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "62ae718ba295f6dc371a00da210b85e5624bc77dcc4608df118538c98298d442"
+checksum = "1232e8975b54261d0b91bb01fb7101b9afff4d8ec051df01b33c76c235eec6fa"
 dependencies = [
  "serde",
  "serde_json",
@@ -2471,9 +2482,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-core"
-version = "1.11.0"
+version = "1.12.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "ff2e25843c917798885bab4251c16f9fbd09fdee607d81c67030063355bb8f86"
+checksum = "6cc421979019131fbefa1b0d9fc93fcd02a38311edcfa2f3750e675334e9efcc"
 dependencies = [
  "serde",
  "serde_json",
@@ -2484,9 +2495,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-chronicle-engine"
-version = "1.11.0"
+version = "1.12.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "f21a0516b21062cce0bf16ceee127ba320252d42661cbed93fa6b17a6e825bc6"
+checksum = "0ebdf6b4686d5432159bdda649cd81af1c4dd8cd58fe38091a8222d8ddd5aafa"
 dependencies = [
  "dashmap",
  "hex",
@@ -2497,9 +2508,64 @@ dependencies = [
  "shroudb-acl",
  "shroudb-chronicle-core",
  "shroudb-crypto",
+ "shroudb-server-bootstrap",
  "shroudb-store",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "shroudb-cipher-client"
+version = "1.6.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "5d1922f0fc9d2a1fa3d63a014ce67a356262bc56864c17624c6048156ddb2aee"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shroudb-client-common",
+ "thiserror",
+]
+
+[[package]]
+name = "shroudb-cipher-core"
+version = "1.6.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "7c38183e20d322e0bcd0784cd39f422030fdd986d282de5070861d279719ad32"
+dependencies = [
+ "base64",
+ "hex",
+ "obfuskey",
+ "serde",
+ "serde_json",
+ "shroudb-crypto",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "shroudb-cipher-engine"
+version = "1.6.0"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "92d4bf3c0a9ba8339a002a279480149fffb56447470d9b558bd43f1e31f3e66f"
+dependencies = [
+ "base64",
+ "dashmap",
+ "hex",
+ "ring",
+ "serde",
+ "serde_json",
+ "shroudb-acl",
+ "shroudb-audit",
+ "shroudb-chronicle-core",
+ "shroudb-cipher-core",
+ "shroudb-courier-core",
+ "shroudb-crypto",
+ "shroudb-server-bootstrap",
+ "shroudb-store",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -2531,6 +2597,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "shroudb-courier-core"
+version = "1.5.1"
+source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
+checksum = "d3924a054e008c10272545d9112f1d848988081daaea0a5a302840d067213821"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "shroudb-crypto"
 version = "0.1.4"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
@@ -2556,9 +2634,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-engine-bootstrap"
-version = "0.1.0"
+version = "0.2.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "cb5bd9e0634969707bd9230d3457b7133c91a628d53aef2b602bb88939f0f98a"
+checksum = "5853c1e2ded364fb38f0cb4a7243784cee73bc06a98a35d655e3acc63015280d"
 dependencies = [
  "anyhow",
  "serde",
@@ -2588,9 +2666,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-sentry-client"
-version = "1.5.1"
+version = "1.6.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "1b75129bed8ea8734a173532e93fcbd9283b5f4d67391cc09cb505d87c982dd8"
+checksum = "5bde7679d588972fef7681fdf3040d3d7492cd1f8a5a31f2975b2394f48f3ef3"
 dependencies = [
  "serde_json",
  "shroudb-acl",
@@ -2601,9 +2679,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-sentry-core"
-version = "1.5.1"
+version = "1.6.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "8d6200578afda764c8b7a89470a9da1cd5adb8aacaed0093e7d9e9af1630eb91"
+checksum = "caf74db979aad45b0d75701cca7d983ba2602099710df4feb8bb4a31beeecf41"
 dependencies = [
  "serde",
  "shroudb-acl",
@@ -2613,9 +2691,9 @@ dependencies = [
 
 [[package]]
 name = "shroudb-sentry-engine"
-version = "1.5.1"
+version = "1.6.0"
 source = "sparse+https://crates.shroudb.dev/api/v1/crates/"
-checksum = "1686f006193cd2fb9895085fda62dc05910399d4b52795f9f1c3b4ef5f96f69c"
+checksum = "298d774a29cf951f79ceed8c1b7c39dc7669424accf7cbf307c2d24e3b94e078"
 dependencies = [
  "base64",
  "dashmap",
@@ -2623,9 +2701,11 @@ dependencies = [
  "serde",
  "serde_json",
  "shroudb-acl",
+ "shroudb-audit",
  "shroudb-chronicle-core",
  "shroudb-crypto",
  "shroudb-sentry-core",
+ "shroudb-server-bootstrap",
  "shroudb-store",
  "thiserror",
  "tokio",
@@ -2667,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2679,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-client"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "base64",
  "serde",
@@ -2690,7 +2770,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2699,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-engine"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "aws-config",
  "aws-sdk-s3",
@@ -2725,7 +2805,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-protocol"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "base64",
  "ring",
@@ -2745,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "shroudb-stash-server"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2756,6 +2836,9 @@ dependencies = [
  "serde",
  "serde_json",
  "shroudb-acl",
+ "shroudb-cipher-client",
+ "shroudb-cipher-core",
+ "shroudb-cipher-engine",
  "shroudb-client",
  "shroudb-crypto",
  "shroudb-engine-bootstrap",

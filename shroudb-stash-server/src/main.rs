@@ -1,3 +1,4 @@
+mod cipher_embedded;
 mod config;
 mod tcp;
 
@@ -5,9 +6,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
+use shroudb_cipher_core::keyring::KeyringAlgorithm;
+use shroudb_cipher_engine::engine::{CipherConfig, CipherEngine};
+use shroudb_cipher_engine::scheduler as cipher_scheduler;
 use shroudb_stash_engine::capabilities::Capabilities;
 use shroudb_stash_engine::engine::{StashConfig, StashEngine};
 use shroudb_stash_engine::s3::{S3Config, S3ObjectStore};
+use shroudb_storage::{EmbeddedStore, StorageEngine};
 use shroudb_store::Store;
 
 use crate::config::{StashServerConfig, load_config};
@@ -60,6 +65,12 @@ async fn main() -> anyhow::Result<()> {
         cfg.server.tcp_bind = bind.parse().context("invalid TCP bind address")?;
     }
 
+    if let Some(ref cipher_cfg) = cfg.cipher {
+        cipher_cfg
+            .validate(&cfg.store.mode)
+            .context("invalid cipher config")?;
+    }
+
     // Store: embedded or remote
     match cfg.store.mode.as_str() {
         "embedded" => {
@@ -71,7 +82,8 @@ async fn main() -> anyhow::Result<()> {
                 storage.clone(),
                 "stash",
             ));
-            run_server(cfg, store, Some(storage)).await
+            let cipher_handle = build_cipher_embedded(&cfg, storage.clone()).await?;
+            run_server(cfg, store, Some(storage), cipher_handle).await
         }
         "remote" => {
             let uri = cfg
@@ -85,16 +97,88 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .context("failed to connect to remote store")?,
             );
-            run_server(cfg, store, None).await
+            run_server(cfg, store, None, None).await
         }
         other => anyhow::bail!("unknown store mode: {other}"),
     }
+}
+
+/// Build an embedded `CipherEngine` if [cipher] is configured as embedded.
+/// Returns `None` for `mode = "remote"` or absent section.
+async fn build_cipher_embedded(
+    cfg: &StashServerConfig,
+    storage: Arc<StorageEngine>,
+) -> anyhow::Result<Option<CipherEmbeddedHandle>> {
+    let Some(cc) = cfg.cipher.as_ref() else {
+        return Ok(None);
+    };
+    if !cc.is_embedded() {
+        return Ok(None);
+    }
+
+    let cipher_store = Arc::new(EmbeddedStore::new(storage, "cipher"));
+    let cipher_config = CipherConfig {
+        default_rotation_days: cc.rotation_days,
+        default_drain_days: cc.drain_days,
+        scheduler_interval_secs: cc.scheduler_interval_secs,
+    };
+    let engine = CipherEngine::new(
+        cipher_store,
+        cipher_config,
+        shroudb_server_bootstrap::Capability::DisabledWithJustification(
+            "embedded cipher inside stash-server has no separate policy wiring",
+        ),
+        shroudb_server_bootstrap::Capability::DisabledWithJustification(
+            "embedded cipher inside stash-server audits via stash's chronicle, not its own",
+        ),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("embedded cipher init failed: {e}"))?;
+
+    let algorithm: KeyringAlgorithm = cc
+        .algorithm
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid cipher algorithm {:?}: {e}", cc.algorithm))?;
+
+    match engine
+        .keyring_create(&cc.keyring, algorithm, None, None, false, None)
+        .await
+    {
+        Ok(_) => tracing::info!(keyring = %cc.keyring, "seeded embedded cipher keyring"),
+        Err(e) => tracing::debug!(keyring = %cc.keyring, error = %e, "keyring seed skipped"),
+    }
+
+    let engine = Arc::new(engine);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let scheduler_handle =
+        cipher_scheduler::start_scheduler(engine.clone(), cc.scheduler_interval_secs, shutdown_rx);
+
+    tracing::info!(
+        keyring = %cc.keyring,
+        rotation_days = cc.rotation_days,
+        "embedded cipher initialized"
+    );
+
+    Ok(Some(CipherEmbeddedHandle {
+        engine,
+        keyring: cc.keyring.clone(),
+        scheduler: scheduler_handle,
+        shutdown_tx,
+    }))
+}
+
+struct CipherEmbeddedHandle {
+    engine: Arc<CipherEngine<EmbeddedStore>>,
+    keyring: String,
+    scheduler: tokio::task::JoinHandle<()>,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 async fn run_server<S: Store + 'static>(
     cfg: StashServerConfig,
     store: Arc<S>,
     storage: Option<Arc<shroudb_storage::StorageEngine>>,
+    cipher_embedded: Option<CipherEmbeddedHandle>,
 ) -> anyhow::Result<()> {
     use shroudb_server_bootstrap::Capability;
 
@@ -136,16 +220,39 @@ async fn run_server<S: Store + 'static>(
         .await
         .context("failed to resolve [policy] capability")?;
 
-    // Cipher for Stash: STORE/RETRIEVE rely on envelope encryption via
-    // Cipher. The standalone server doesn't expose a [cipher] config
-    // section today (mirroring Scroll's pattern is follow-up scope).
-    // Embedded Cipher via Moat is the supported path. Making the slot
-    // explicit DisabledWithJustification surfaces WHY data-plane ops
-    // refuse at startup.
-    let cipher_cap =
-        Capability::<Box<dyn shroudb_stash_engine::capabilities::StashCipherOps>>::disabled(
-            "stash-server standalone deploys use Moat for embedded cipher; direct wiring is follow-up scope",
-        );
+    // Cipher wiring — three modes per config:
+    //   - embedded: in-process CipherEngine from build_cipher_embedded
+    //   - remote:   TCP client to an external shroudb-cipher server
+    //   - absent:   explicit DisabledWithJustification so data-plane
+    //               ops fail-closed with a visible reason at use site
+    let cipher_cap: Capability<Box<dyn shroudb_stash_engine::capabilities::StashCipherOps>> =
+        match (cfg.cipher.as_ref(), cipher_embedded) {
+            (Some(cc), Some(handle)) if cc.is_embedded() => {
+                let ops = cipher_embedded::EmbeddedStashCipherOps::new(
+                    handle.engine.clone(),
+                    handle.keyring.clone(),
+                );
+                tracing::info!(keyring = %handle.keyring, "cipher wired (embedded)");
+                // Scheduler + shutdown signal live for process lifetime;
+                // stash-server doesn't currently have a shutdown cascade
+                // into embedded engines, so hand the handles off to the
+                // tokio runtime — they drop when the process exits.
+                let _ = (handle.scheduler, handle.shutdown_tx);
+                Capability::Enabled(
+                    Box::new(ops) as Box<dyn shroudb_stash_engine::capabilities::StashCipherOps>
+                )
+            }
+            (Some(cc), _) if cc.is_remote() => {
+                anyhow::bail!(
+                    "cipher.mode = \"remote\" is not yet wired in stash-server; \
+                     use cipher.mode = \"embedded\" (requires embedded store) or \
+                     deploy Stash via Moat"
+                );
+            }
+            _ => Capability::disabled(
+                "no [cipher] section configured — STORE/RETRIEVE will fail-closed at use site",
+            ),
+        };
 
     // Stash engine
     let stash_config = StashConfig {
