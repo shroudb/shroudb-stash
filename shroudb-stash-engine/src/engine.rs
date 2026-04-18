@@ -201,7 +201,7 @@ impl<S: Store> StashEngine<S> {
                 .await?;
 
             self.emit_audit("STORE", tenant, id, EventResult::Ok, actor)
-                .await;
+                .await?;
 
             tracing::info!(
                 blob_id = id,
@@ -311,7 +311,7 @@ impl<S: Store> StashEngine<S> {
 
         // Audit.
         self.emit_audit("STORE", tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         tracing::info!(
             blob_id = id,
@@ -413,7 +413,7 @@ impl<S: Store> StashEngine<S> {
 
         // Audit.
         self.emit_audit("RETRIEVE", tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         Ok(RetrieveResult {
             data,
@@ -447,7 +447,7 @@ impl<S: Store> StashEngine<S> {
         let viewer_count = viewer_map.len();
 
         self.emit_audit("INSPECT", tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         Ok(InspectResult::from((&metadata, viewer_count)))
     }
@@ -506,7 +506,7 @@ impl<S: Store> StashEngine<S> {
         self.save_metadata(&metadata).await?;
 
         self.emit_audit("REWRAP", tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         Ok(metadata)
     }
@@ -638,7 +638,7 @@ impl<S: Store> StashEngine<S> {
 
         let op = if soft { "REVOKE_SOFT" } else { "REVOKE_HARD" };
         self.emit_audit(op, tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         Ok(())
     }
@@ -776,7 +776,7 @@ impl<S: Store> StashEngine<S> {
 
         // Audit.
         self.emit_audit("FINGERPRINT", tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         tracing::info!(
             blob_id = id,
@@ -811,7 +811,7 @@ impl<S: Store> StashEngine<S> {
 
         // Audit.
         self.emit_audit("TRACE", tenant, id, EventResult::Ok, actor)
-            .await;
+            .await?;
 
         Ok(TraceResult::from((&metadata, viewer_map.viewers)))
     }
@@ -975,7 +975,7 @@ impl<S: Store> StashEngine<S> {
         }
 
         self.emit_audit("LIST", tenant, "*", EventResult::Ok, actor)
-            .await;
+            .await?;
 
         Ok(results)
     }
@@ -1087,7 +1087,17 @@ impl<S: Store> StashEngine<S> {
         Ok(())
     }
 
-    /// Emit an audit event to Chronicle (fire-and-forget).
+    /// Emit an audit event to Chronicle.
+    ///
+    /// When chronicle is `Enabled` and the sink rejects the event, the
+    /// error is surfaced to the caller. Security-critical operations
+    /// that cannot be audited must be reported as failures so an
+    /// attacker who can take the audit sink down cannot invisibly
+    /// STORE or RETRIEVE.
+    ///
+    /// When chronicle is not `Enabled` (either `DisabledForTests` or
+    /// `DisabledWithJustification`), the operator has explicitly opted
+    /// out and the caller does not block on audit.
     async fn emit_audit(
         &self,
         operation: &str,
@@ -1095,10 +1105,10 @@ impl<S: Store> StashEngine<S> {
         resource: &str,
         result: EventResult,
         actor: Option<&str>,
-    ) {
+    ) -> Result<(), StashError> {
         let chronicle = match self.capabilities.chronicle.as_ref() {
             Some(c) => c,
-            None => return,
+            None => return Ok(()),
         };
 
         let event = Event::new(
@@ -1110,14 +1120,15 @@ impl<S: Store> StashEngine<S> {
             actor.unwrap_or("anonymous").to_string(),
         );
 
-        if let Err(e) = chronicle.record(event).await {
-            tracing::warn!(
+        chronicle.record(event).await.map_err(|e| {
+            tracing::error!(
                 operation,
                 resource,
                 error = %e,
-                "failed to record audit event"
+                "audit emission failed — aborting operation"
             );
-        }
+            StashError::Internal(format!("audit emission failed: {e}"))
+        })
     }
 }
 
