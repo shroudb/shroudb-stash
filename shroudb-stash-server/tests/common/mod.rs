@@ -51,6 +51,34 @@ impl StashCipherOps for MockCipherOps {
     }
 }
 
+/// PolicyEvaluator double that permits every request. The server
+/// integration tests exercise wire protocol + engine plumbing, not
+/// ABAC policy, so they plug this in instead of `DisabledForTests`
+/// which the engine now treats as fail-closed.
+struct AllowAllSentry;
+impl shroudb_acl::PolicyEvaluator for AllowAllSentry {
+    fn evaluate(
+        &self,
+        _request: &shroudb_acl::PolicyRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<shroudb_acl::PolicyDecision, shroudb_acl::AclError>,
+                > + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            Ok(shroudb_acl::PolicyDecision {
+                effect: shroudb_acl::PolicyEffect::Permit,
+                matched_policy: Some("integration-test-allow-all".into()),
+                token: None,
+                cache_until: None,
+            })
+        })
+    }
+}
+
 /// Test server configuration.
 #[derive(Default)]
 pub struct TestServerConfig {
@@ -140,7 +168,7 @@ impl TestServer {
             } else {
                 Capability::Enabled(Box::new(MockCipherOps::new()))
             },
-            sentry: Capability::DisabledForTests,
+            sentry: Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: Capability::DisabledForTests,
         };
         let engine = Arc::new(

@@ -300,12 +300,40 @@ mod tests {
         }
     }
 
+    /// PolicyEvaluator double that always permits — the dispatch layer's
+    /// tests exercise protocol wiring, not ABAC policy, so they use this
+    /// rather than `Capability::DisabledForTests` (which the engine now
+    /// treats as fail-closed).
+    struct AllowAllSentry;
+    impl shroudb_acl::PolicyEvaluator for AllowAllSentry {
+        fn evaluate(
+            &self,
+            _request: &shroudb_acl::PolicyRequest,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<shroudb_acl::PolicyDecision, shroudb_acl::AclError>,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async {
+                Ok(shroudb_acl::PolicyDecision {
+                    effect: shroudb_acl::PolicyEffect::Permit,
+                    matched_policy: Some("test-allow-all".into()),
+                    token: None,
+                    cache_until: None,
+                })
+            })
+        }
+    }
+
     async fn setup() -> StashEngine<shroudb_storage::EmbeddedStore> {
         let store = shroudb_storage::test_util::create_test_store("stash-proto-test").await;
         let obj_store = Arc::new(InMemoryObjectStore::new());
         let caps = Capabilities {
             cipher: shroudb_server_bootstrap::Capability::Enabled(Box::new(MockCipherOps::new())),
-            sentry: shroudb_server_bootstrap::Capability::DisabledForTests,
+            sentry: shroudb_server_bootstrap::Capability::Enabled(Arc::new(AllowAllSentry)),
             chronicle: shroudb_server_bootstrap::Capability::DisabledForTests,
         };
         StashEngine::new(store, obj_store, caps, StashConfig::default())

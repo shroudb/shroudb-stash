@@ -370,8 +370,13 @@ impl<S: Store> StashEngine<S> {
         // canonical blob's ID as AAD. Use the canonical ID for decryption.
         let aad_id = metadata.canonical_id.as_deref().unwrap_or(id);
 
+        // Tracks which AAD-binding regime was used to decrypt so the
+        // audit event can flag legacy compat decrypts for monitoring.
+        let aad_binding: &str;
+
         let (data, returned_dek) = if metadata.client_encrypted {
             // Client-encrypted: return raw data + wrapped DEK for client-side decryption.
+            aad_binding = "client";
             (encrypted_data, Some(metadata.wrapped_dek.clone()))
         } else if metadata.wrapped_dek.is_empty() {
             // Server-encrypted blob with no wrapped DEK is incoherent: there
@@ -391,6 +396,7 @@ impl<S: Store> StashEngine<S> {
             let plaintext_key = cipher.unwrap_data_key(&metadata.wrapped_dek).await?;
 
             let plaintext = if crate::crypto::is_chunked(&encrypted_data) {
+                aad_binding = "modern-chunked";
                 crate::crypto::decrypt_blob_chunked(
                     plaintext_key.as_bytes(),
                     &encrypted_data,
@@ -404,6 +410,7 @@ impl<S: Store> StashEngine<S> {
                     &encrypted_data,
                     aad_id.as_bytes(),
                 )?;
+                aad_binding = if used_legacy { "legacy" } else { "modern" };
                 if used_legacy {
                     tracing::warn!(
                         blob_id = id,
@@ -420,9 +427,17 @@ impl<S: Store> StashEngine<S> {
             return Err(StashError::CipherUnavailable);
         };
 
-        // Audit.
-        self.emit_audit("RETRIEVE", tenant, id, EventResult::Ok, actor)
-            .await?;
+        // Audit — include the AAD-binding mode so operators can spot
+        // legacy compat decrypts without parsing log lines.
+        self.emit_audit_with_metadata(
+            "RETRIEVE",
+            tenant,
+            id,
+            EventResult::Ok,
+            actor,
+            &[("aad_binding", aad_binding)],
+        )
+        .await?;
 
         Ok(RetrieveResult {
             data,
@@ -1132,12 +1147,30 @@ impl<S: Store> StashEngine<S> {
         result: EventResult,
         actor: Option<&str>,
     ) -> Result<(), StashError> {
+        self.emit_audit_with_metadata(operation, tenant, resource, result, actor, &[])
+            .await
+    }
+
+    /// Emit an audit event with additional `metadata` key-value pairs.
+    ///
+    /// Same semantics as [`emit_audit`], plus the supplied metadata is
+    /// attached to the event so operational monitoring can flag things
+    /// like legacy-AAD decrypts without parsing log lines.
+    async fn emit_audit_with_metadata(
+        &self,
+        operation: &str,
+        tenant: &str,
+        resource: &str,
+        result: EventResult,
+        actor: Option<&str>,
+        metadata: &[(&str, &str)],
+    ) -> Result<(), StashError> {
         let chronicle = match self.capabilities.chronicle.as_ref() {
             Some(c) => c,
             None => return Ok(()),
         };
 
-        let event = Event::new(
+        let mut event = Event::new(
             ChronicleEngine::Stash,
             operation.to_string(),
             "blob".to_string(),
@@ -1145,6 +1178,9 @@ impl<S: Store> StashEngine<S> {
             result,
             actor.unwrap_or("anonymous").to_string(),
         );
+        for (k, v) in metadata {
+            event.metadata.insert((*k).to_string(), (*v).to_string());
+        }
 
         chronicle.record(event).await.map_err(|e| {
             tracing::error!(

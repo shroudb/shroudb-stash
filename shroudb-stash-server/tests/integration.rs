@@ -1,6 +1,7 @@
 mod common;
 
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use common::*;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -770,7 +771,7 @@ async fn test_acl_wrong_token_rejected() {
 // ═══════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn test_no_cipher_raw_store_retrieve() {
+async fn test_no_cipher_server_encrypted_store_fails_closed() {
     let server = TestServer::start_with_config(TestServerConfig {
         no_cipher: true,
         ..Default::default()
@@ -781,24 +782,27 @@ async fn test_no_cipher_raw_store_retrieve() {
         .await
         .expect("connect failed");
 
-    let plaintext = b"stored without encryption";
+    let plaintext = b"would-be-plaintext";
 
-    let store_result = client
+    // Server-encrypted STORE without Cipher must fail-closed — uploading
+    // plaintext to S3 would violate "no plaintext at rest".
+    let err = client
         .store("raw-1", plaintext, None, Some("text/plain"))
         .await
-        .expect("store should succeed without Cipher");
+        .expect_err("STORE without Cipher must fail-closed");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cipher") || msg.contains("CIPHER") || msg.contains("unavailable"),
+        "error should name the missing cipher capability, got: {msg}"
+    );
 
-    assert_eq!(store_result.id, "raw-1");
-    // Raw mode: plaintext_size == encrypted_size (no crypto overhead).
-    assert_eq!(store_result.plaintext_size, store_result.encrypted_size);
-
-    // Retrieve should return raw bytes.
-    let result = client.retrieve("raw-1").await.expect("retrieve failed");
-    assert_eq!(result.data, plaintext);
+    // RETRIEVE of a blob that never stored also fails (NotFound).
+    let retrieve_err = client.retrieve("raw-1").await;
+    assert!(retrieve_err.is_err());
 }
 
 #[tokio::test]
-async fn test_no_cipher_inspect_and_revoke() {
+async fn test_no_cipher_client_encrypted_passthrough_still_works() {
     let server = TestServer::start_with_config(TestServerConfig {
         no_cipher: true,
         ..Default::default()
@@ -809,34 +813,38 @@ async fn test_no_cipher_inspect_and_revoke() {
         .await
         .expect("connect failed");
 
-    client
-        .store("raw-rev", b"revoke me raw", None, None)
+    // Client-encrypted passthrough does not need a server-side Cipher —
+    // the client owns encryption. Stash just stores the ciphertext as-is.
+    let ciphertext = vec![0xBBu8; 64];
+    let wrapped_dek = STANDARD.encode([0xAAu8; 48]);
+
+    let stored = client
+        .store_client_encrypted(
+            "ce-ok",
+            &ciphertext,
+            &wrapped_dek,
+            Some("application/octet-stream"),
+        )
         .await
-        .expect("store failed");
+        .expect("client-encrypted store should succeed without Cipher");
+    assert!(stored.client_encrypted);
 
-    // Inspect works.
-    let info = client.inspect("raw-rev").await.expect("inspect failed");
-    assert_eq!(info.blob_status, "active");
-    assert_eq!(info.plaintext_size, info.encrypted_size);
+    let retrieved = client.retrieve("ce-ok").await.expect("retrieve failed");
+    assert!(retrieved.client_encrypted);
+    assert_eq!(retrieved.data, ciphertext);
+    assert_eq!(retrieved.wrapped_dek.as_deref(), Some(wrapped_dek.as_str()));
 
-    // Hard revoke works.
-    let revoke_result = client
-        .revoke("raw-rev", false)
-        .await
-        .expect("revoke failed");
-    assert_eq!(revoke_result.revoke_mode, "hard");
+    // Hard revoke still works — Cipher is not required for crypto-shred
+    // since there is no server-managed DEK to destroy.
+    let revoke = client.revoke("ce-ok", false).await.expect("revoke failed");
+    assert_eq!(revoke.revoke_mode, "hard");
 
-    // Retrieve fails after revoke.
-    let err = client.retrieve("raw-rev").await;
-    assert!(err.is_err());
-
-    // Inspect shows shredded.
-    let info = client.inspect("raw-rev").await.expect("inspect failed");
+    let info = client.inspect("ce-ok").await.expect("inspect failed");
     assert_eq!(info.blob_status, "shredded");
 }
 
 #[tokio::test]
-async fn test_no_cipher_with_minio() {
+async fn test_no_cipher_with_minio_fails_closed() {
     let server = match TestServer::start_with_config(TestServerConfig {
         no_cipher: true,
         use_minio: true,
@@ -854,37 +862,30 @@ async fn test_no_cipher_with_minio() {
         .await
         .expect("connect failed");
 
-    let data = b"raw MinIO blob";
+    let data = b"secret that must never reach S3 as plaintext";
 
-    client
+    // STORE must fail-closed before any S3 PUT occurs.
+    let err = client
         .store("raw-minio-1", data, None, Some("text/plain"))
         .await
-        .expect("raw store to MinIO failed");
+        .expect_err("server-encrypted STORE without Cipher must fail-closed");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cipher") || msg.contains("CIPHER") || msg.contains("unavailable"),
+        "error should name the missing cipher capability, got: {msg}"
+    );
 
-    // Verify S3 object contains the raw (unencrypted) data directly.
+    // Belt-and-braces: verify S3 has no object for this key.
     let s3 = server.s3_client().await.expect("s3 client");
     let bucket = server.s3_bucket.as_ref().unwrap();
-    let obj = s3
-        .get_object()
+    let head = s3
+        .head_object()
         .bucket(bucket)
         .key("default/raw-minio-1")
         .send()
-        .await
-        .expect("S3 GET should find the raw object");
-    let s3_bytes = obj
-        .body
-        .collect()
-        .await
-        .expect("read body")
-        .into_bytes()
-        .to_vec();
-    // In raw mode, S3 contains the plaintext directly.
-    assert_eq!(s3_bytes, data);
-
-    // Retrieve via Stash roundtrips.
-    let result = client
-        .retrieve("raw-minio-1")
-        .await
-        .expect("retrieve failed");
-    assert_eq!(result.data, data);
+        .await;
+    assert!(
+        head.is_err(),
+        "no object should exist in S3 when STORE fails-closed"
+    );
 }

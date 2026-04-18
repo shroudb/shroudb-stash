@@ -26,5 +26,5 @@ Rules:
 - [x] **DEBT-3** — audit failure must propagate to caller (currently logged and ignored). Test: `debt_3_audit_failure_must_propagate_to_caller` @ same file.
 - [x] **DEBT-4** — hard-revoke must propagate S3 delete failure (currently marks Shredded but ciphertext survives). Test: `debt_4_hard_revoke_must_propagate_s3_delete_failure` @ same file.
 - [x] **DEBT-5** — empty-`wrapped_dek` retrieve path must fail-closed, not return raw bytes. Test: `debt_5_retrieve_raw_blob_must_fail_closed` @ same file.
-- [ ] **DEBT-6** — legacy-AAD decrypt must emit a distinct audit event (currently silent `tracing::warn!` with no Chronicle record). Test: `debt_6_legacy_aad_decrypt_must_emit_distinct_audit_event` @ same file.
+- [x] **DEBT-6** — legacy-AAD decrypt must emit a distinct audit event (currently silent `tracing::warn!` with no Chronicle record). Test: `debt_6_legacy_aad_decrypt_must_emit_distinct_audit_event` @ same file.
 - [ ] **F-stash-8 (L)** — `dispatch.rs:39` — when `auth_context` is None, tenant silently defaults to `"default"`. Combined with DEBT-2, unauthenticated caller lands on tenant `"default"` with no checks. *No debt test yet; add one before fixing.*
