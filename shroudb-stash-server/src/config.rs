@@ -27,10 +27,15 @@ pub struct StashServerConfig {
     /// will fail-closed with `CapabilityMissing("cipher")`.
     #[serde(default)]
     pub cipher: Option<CipherConfig>,
-    /// Audit (Chronicle) capability slot. Absent = fail-closed at startup.
+    /// Audit (Chronicle) capability slot. Absent = resolved as embedded
+    /// Chronicle on the shared StorageEngine (the default mode declared
+    /// by `shroudb-engine-bootstrap` 0.3.0). Embedded init failures
+    /// still surface at startup — absence is not an error, a broken
+    /// embedded sink is.
     #[serde(default)]
     pub audit: Option<AuditConfig>,
-    /// Policy (Sentry) capability slot. Same contract.
+    /// Policy (Sentry) capability slot. Same contract as `audit`:
+    /// absent = embedded Sentry on the shared StorageEngine.
     #[serde(default)]
     pub policy: Option<PolicyConfig>,
 }
