@@ -77,13 +77,3 @@ thiserror = "2"
 anyhow = "1"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
-
-# Local override for the in-flight engine-bootstrap 0.3.0 release.
-# This pulls the crate from the commons workspace checkout where 0.3.0
-# is committed but not yet published to the `shroudb` registry. It is
-# TEMPORARY — remove once shroudb-engine-bootstrap 0.3.0 is on the
-# registry. Only this one crate is patched; every other registry dep
-# must still resolve from the registry so type-identity stays unified
-# with published downstream crates (see engine-bootstrap/Cargo.toml).
-[patch.shroudb]
-shroudb-engine-bootstrap = { path = "../commons/shroudb-engine-bootstrap" }
