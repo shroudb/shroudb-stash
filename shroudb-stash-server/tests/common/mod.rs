@@ -26,7 +26,7 @@ impl MockCipherOps {
 }
 
 impl StashCipherOps for MockCipherOps {
-    fn generate_data_key(&self, _bits: Option<u32>) -> BoxFut<'_, DataKeyPair> {
+    fn generate_data_key(&self, _bits: Option<u32>, _actor: &str) -> BoxFut<'_, DataKeyPair> {
         Box::pin(async move {
             Ok(DataKeyPair {
                 plaintext_key: SensitiveBytes::new(self.dek.to_vec()),
@@ -36,11 +36,11 @@ impl StashCipherOps for MockCipherOps {
         })
     }
 
-    fn unwrap_data_key(&self, _wrapped_key: &str) -> BoxFut<'_, SensitiveBytes> {
+    fn unwrap_data_key(&self, _wrapped_key: &str, _actor: &str) -> BoxFut<'_, SensitiveBytes> {
         Box::pin(async move { Ok(SensitiveBytes::new(self.dek.to_vec())) })
     }
 
-    fn rewrap_data_key(&self, _old_wrapped_key: &str) -> BoxFut<'_, DataKeyPair> {
+    fn rewrap_data_key(&self, _old_wrapped_key: &str, _actor: &str) -> BoxFut<'_, DataKeyPair> {
         Box::pin(async move {
             Ok(DataKeyPair {
                 plaintext_key: SensitiveBytes::new(self.dek.to_vec()),

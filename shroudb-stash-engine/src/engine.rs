@@ -230,7 +230,9 @@ impl<S: Store> StashEngine<S> {
                 (data.to_vec(), dek.to_string(), 0, size, size)
             } else if let Some(cipher) = self.capabilities.cipher.as_ref() {
                 // Server-side encryption via Cipher envelope encryption.
-                let dek_pair = cipher.generate_data_key(Some(256)).await?;
+                let dek_pair = cipher
+                    .generate_data_key(Some(256), actor.unwrap_or("anonymous"))
+                    .await?;
                 let plaintext_key = dek_pair.plaintext_key;
 
                 let use_streaming = self.config.streaming_threshold_bytes > 0
@@ -393,7 +395,9 @@ impl<S: Store> StashEngine<S> {
             )));
         } else if let Some(cipher) = self.capabilities.cipher.as_ref() {
             // Server-side decryption: unwrap DEK via Cipher, decrypt locally.
-            let plaintext_key = cipher.unwrap_data_key(&metadata.wrapped_dek).await?;
+            let plaintext_key = cipher
+                .unwrap_data_key(&metadata.wrapped_dek, actor.unwrap_or("anonymous"))
+                .await?;
 
             let plaintext = if crate::crypto::is_chunked(&encrypted_data) {
                 aad_binding = "modern-chunked";
@@ -522,7 +526,9 @@ impl<S: Store> StashEngine<S> {
             .as_ref()
             .ok_or(StashError::CipherUnavailable)?;
 
-        let new_pair = cipher.rewrap_data_key(&metadata.wrapped_dek).await?;
+        let new_pair = cipher
+            .rewrap_data_key(&metadata.wrapped_dek, actor.unwrap_or("anonymous"))
+            .await?;
         metadata.wrapped_dek = new_pair.wrapped_key;
         metadata.key_version = new_pair.key_version;
         metadata.updated_at = now_ms();
@@ -748,7 +754,9 @@ impl<S: Store> StashEngine<S> {
             .map_err(|e| StashError::ObjectStore(e.to_string()))?;
 
         // Unwrap master DEK via Cipher.
-        let master_key = cipher.unwrap_data_key(&metadata.wrapped_dek).await?;
+        let master_key = cipher
+            .unwrap_data_key(&metadata.wrapped_dek, actor.unwrap_or("anonymous"))
+            .await?;
 
         // Decrypt blob locally.
         let plaintext = if crate::crypto::is_chunked(&encrypted_data) {
@@ -769,7 +777,9 @@ impl<S: Store> StashEngine<S> {
         drop(master_key);
 
         // Generate new viewer DEK via Cipher.
-        let viewer_dek_pair = cipher.generate_data_key(Some(256)).await?;
+        let viewer_dek_pair = cipher
+            .generate_data_key(Some(256), actor.unwrap_or("anonymous"))
+            .await?;
         let viewer_key = viewer_dek_pair.plaintext_key;
 
         // Encrypt plaintext with viewer DEK using viewer-specific AAD.
@@ -1241,6 +1251,7 @@ mod tests {
         fn generate_data_key(
             &self,
             _bits: Option<u32>,
+            _actor: &str,
         ) -> crate::capabilities::BoxFut<'_, DataKeyPair> {
             Box::pin(async move {
                 Ok(DataKeyPair {
@@ -1255,6 +1266,7 @@ mod tests {
         fn unwrap_data_key(
             &self,
             _wrapped_key: &str,
+            _actor: &str,
         ) -> crate::capabilities::BoxFut<'_, SensitiveBytes> {
             Box::pin(async move { Ok(SensitiveBytes::new(self.dek.to_vec())) })
         }
@@ -1262,6 +1274,7 @@ mod tests {
         fn rewrap_data_key(
             &self,
             _old_wrapped_key: &str,
+            _actor: &str,
         ) -> crate::capabilities::BoxFut<'_, DataKeyPair> {
             Box::pin(async move {
                 Ok(DataKeyPair {

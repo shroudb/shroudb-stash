@@ -288,6 +288,7 @@ mod tests {
         fn generate_data_key(
             &self,
             _bits: Option<u32>,
+            _actor: &str,
         ) -> shroudb_stash_engine::capabilities::BoxFut<'_, DataKeyPair> {
             Box::pin(async move {
                 Ok(DataKeyPair {
@@ -301,6 +302,7 @@ mod tests {
         fn unwrap_data_key(
             &self,
             _wrapped_key: &str,
+            _actor: &str,
         ) -> shroudb_stash_engine::capabilities::BoxFut<'_, SensitiveBytes> {
             Box::pin(async move { Ok(SensitiveBytes::new(self.dek.to_vec())) })
         }
@@ -308,6 +310,7 @@ mod tests {
         fn rewrap_data_key(
             &self,
             _old_wrapped_key: &str,
+            _actor: &str,
         ) -> shroudb_stash_engine::capabilities::BoxFut<'_, DataKeyPair> {
             Box::pin(async move {
                 Ok(DataKeyPair {

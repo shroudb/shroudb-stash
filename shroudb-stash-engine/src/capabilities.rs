@@ -33,20 +33,28 @@ pub trait StashCipherOps: Send + Sync {
     /// Generate a random data encryption key and wrap it with the keyring's active key.
     ///
     /// `bits` defaults to 256 if `None`.
-    fn generate_data_key(&self, bits: Option<u32>) -> BoxFut<'_, DataKeyPair>;
+    ///
+    /// `actor` identifies the caller for audit attribution. Pass the
+    /// authenticated user/service identity; for scheduler-driven or
+    /// internal callers pass a stable system sentinel. Must be non-empty.
+    fn generate_data_key(&self, bits: Option<u32>, actor: &str) -> BoxFut<'_, DataKeyPair>;
 
     /// Unwrap a previously wrapped DEK by decrypting the CiphertextEnvelope.
     ///
     /// The returned `SensitiveBytes` contains the plaintext DEK and will be
     /// zeroized on drop.
-    fn unwrap_data_key(&self, wrapped_key: &str) -> BoxFut<'_, SensitiveBytes>;
+    ///
+    /// `actor` identifies the caller for audit attribution.
+    fn unwrap_data_key(&self, wrapped_key: &str, actor: &str) -> BoxFut<'_, SensitiveBytes>;
 
     /// Re-wrap a DEK under the current active key version. Unwraps the old
     /// wrapped key, then wraps the plaintext DEK with the keyring's current key.
     ///
     /// Returns a new `DataKeyPair` with the updated `wrapped_key` and `key_version`.
     /// The blob ciphertext is NOT re-encrypted — only the wrapping changes.
-    fn rewrap_data_key(&self, old_wrapped_key: &str) -> BoxFut<'_, DataKeyPair>;
+    ///
+    /// `actor` identifies the caller for audit attribution.
+    fn rewrap_data_key(&self, old_wrapped_key: &str, actor: &str) -> BoxFut<'_, DataKeyPair>;
 }
 
 /// Engine capabilities provided at construction time.

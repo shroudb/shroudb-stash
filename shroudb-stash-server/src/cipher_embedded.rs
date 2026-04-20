@@ -29,7 +29,7 @@ impl<S: Store> EmbeddedStashCipherOps<S> {
 }
 
 impl<S: Store + 'static> StashCipherOps for EmbeddedStashCipherOps<S> {
-    fn generate_data_key(&self, bits: Option<u32>) -> BoxFut<'_, DataKeyPair> {
+    fn generate_data_key(&self, bits: Option<u32>, _actor: &str) -> BoxFut<'_, DataKeyPair> {
         Box::pin(async move {
             let result = self
                 .engine
@@ -43,7 +43,7 @@ impl<S: Store + 'static> StashCipherOps for EmbeddedStashCipherOps<S> {
         })
     }
 
-    fn unwrap_data_key(&self, wrapped_key: &str) -> BoxFut<'_, SensitiveBytes> {
+    fn unwrap_data_key(&self, wrapped_key: &str, _actor: &str) -> BoxFut<'_, SensitiveBytes> {
         let wrapped = wrapped_key.to_string();
         Box::pin(async move {
             let result = self
@@ -55,7 +55,7 @@ impl<S: Store + 'static> StashCipherOps for EmbeddedStashCipherOps<S> {
         })
     }
 
-    fn rewrap_data_key(&self, old_wrapped_key: &str) -> BoxFut<'_, DataKeyPair> {
+    fn rewrap_data_key(&self, old_wrapped_key: &str, _actor: &str) -> BoxFut<'_, DataKeyPair> {
         let wrapped = old_wrapped_key.to_string();
         Box::pin(async move {
             // rewrap decrypts with the old key version and re-encrypts with
@@ -118,12 +118,15 @@ mod tests {
         let cipher = build_cipher().await;
         let ops = EmbeddedStashCipherOps::new(cipher, "stash-blobs".into());
 
-        let pair = ops.generate_data_key(Some(256)).await.expect("generate");
+        let pair = ops
+            .generate_data_key(Some(256), "test-actor")
+            .await
+            .expect("generate");
         assert_eq!(pair.plaintext_key.as_bytes().len(), 32);
         assert!(!pair.wrapped_key.is_empty());
 
         let unwrapped = ops
-            .unwrap_data_key(&pair.wrapped_key)
+            .unwrap_data_key(&pair.wrapped_key, "test-actor")
             .await
             .expect("unwrap");
         assert_eq!(unwrapped.as_bytes(), pair.plaintext_key.as_bytes());
@@ -134,9 +137,12 @@ mod tests {
         let cipher = build_cipher().await;
         let ops = EmbeddedStashCipherOps::new(cipher, "stash-blobs".into());
 
-        let original = ops.generate_data_key(Some(256)).await.expect("generate");
+        let original = ops
+            .generate_data_key(Some(256), "test-actor")
+            .await
+            .expect("generate");
         let rewrapped = ops
-            .rewrap_data_key(&original.wrapped_key)
+            .rewrap_data_key(&original.wrapped_key, "test-actor")
             .await
             .expect("rewrap");
 
