@@ -266,6 +266,12 @@ async fn run_server<S: Store + 'static>(
         tracing::info!(tokens = cfg.auth.tokens.len(), "token-based auth enabled");
     }
 
+    // Audit-on requires an authenticated actor at the engine layer.
+    // Refuse to start with [audit] enabled but [auth].tokens empty.
+    audit_cfg
+        .require_auth_validator(token_validator.is_some())
+        .context("invalid [audit] / [auth] composition")?;
+
     // TCP server
     let tcp_listener = tokio::net::TcpListener::bind(cfg.server.tcp_bind)
         .await

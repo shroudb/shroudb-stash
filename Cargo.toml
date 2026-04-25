@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.92"
 license = "LicenseRef-Proprietary"
@@ -19,10 +19,10 @@ publish = ["shroudb"]
 
 [workspace.dependencies]
 # Internal crates
-shroudb-stash-core = { path = "shroudb-stash-core", version = "0.8.0", registry = "shroudb" }
-shroudb-stash-engine = { path = "shroudb-stash-engine", version = "0.8.0", registry = "shroudb" }
-shroudb-stash-protocol = { path = "shroudb-stash-protocol", version = "0.8.0", registry = "shroudb" }
-shroudb-stash-client = { path = "shroudb-stash-client", version = "0.8.0", registry = "shroudb" }
+shroudb-stash-core = { path = "shroudb-stash-core", version = "0.9.0", registry = "shroudb" }
+shroudb-stash-engine = { path = "shroudb-stash-engine", version = "0.9.0", registry = "shroudb" }
+shroudb-stash-protocol = { path = "shroudb-stash-protocol", version = "0.9.0", registry = "shroudb" }
+shroudb-stash-client = { path = "shroudb-stash-client", version = "0.9.0", registry = "shroudb" }
 
 # Cipher (embedded in-process option for stash-server)
 shroudb-cipher-engine = { version = "2.0.0", registry = "shroudb" }
@@ -41,7 +41,7 @@ shroudb-protocol-wire = { version = "0.2.0", registry = "shroudb" }
 shroudb-server-tcp = { version = "0.2.2", registry = "shroudb" }
 tokio-rustls = "0.26"
 shroudb-server-bootstrap = { version = "0.2.0", registry = "shroudb" }
-shroudb-engine-bootstrap = { version = "0.3.0", registry = "shroudb" }
+shroudb-engine-bootstrap = { version = "0.4.0", registry = "shroudb" }
 shroudb-client-common = { version = "0.2.0", registry = "shroudb" }
 
 # Async
